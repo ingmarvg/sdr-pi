@@ -1,0 +1,16 @@
+[Unit]
+Description=sdr-pi OP25 P25 scanner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/sdr-pi/sdr-pi.conf
+ExecStart=/usr/local/bin/sdr-pi-op25-wrapper
+Restart=on-failure
+RestartSec=5
+User=sdr
+Group=plugdev
+
+[Install]
+WantedBy=multi-user.target

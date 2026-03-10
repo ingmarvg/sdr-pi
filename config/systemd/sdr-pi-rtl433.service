@@ -1,0 +1,16 @@
+[Unit]
+Description=sdr-pi rtl_433 TCP bridge (TPMS + POCSAG)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/sdr-pi/sdr-pi.conf
+ExecStart=/usr/local/bin/sdr-pi-rtl433-wrapper
+Restart=on-failure
+RestartSec=5
+User=sdr
+Group=plugdev
+
+[Install]
+WantedBy=multi-user.target

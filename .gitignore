@@ -1,0 +1,30 @@
+# Actual configuration (only commit .default/.example versions)
+sdr-pi.conf
+config/network/wpa_supplicant.conf
+
+# Credentials and secrets
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+secrets/
+
+# Build artifacts
+*.img
+*.iso
+build/
+deploy/
+
+# Logs
+*.log
+logs/
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

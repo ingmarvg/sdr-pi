@@ -1,0 +1,42 @@
+# sdr-pi configuration
+# Installed to /etc/sdr-pi/sdr-pi.conf
+
+# ---------------------------------------------------------------------------
+# General
+# ---------------------------------------------------------------------------
+
+# Protocols to enable on boot (space-separated): tpms pocsag adsb p25
+ENABLED_PROTOCOLS="tpms adsb"
+
+# ---------------------------------------------------------------------------
+# RTL-SDR device assignment
+# Use `rtl_test` to find device serial numbers.
+# Leave blank for auto-assignment.
+# ---------------------------------------------------------------------------
+RTL433_DEVICE_SERIAL=""
+DUMP1090_DEVICE_SERIAL=""
+OP25_DEVICE_SERIAL=""
+
+# ---------------------------------------------------------------------------
+# rtl_433  (TPMS + POCSAG on port 1234)
+# ---------------------------------------------------------------------------
+RTL433_FREQUENCY="315M"
+RTL433_GAIN="auto"
+RTL433_PORT="1234"
+# Additional rtl_433 flags (e.g. "-R 59 -R 60" to limit decoders)
+RTL433_EXTRA_ARGS=""
+
+# ---------------------------------------------------------------------------
+# dump1090  (ADS-B on port 30003)
+# ---------------------------------------------------------------------------
+DUMP1090_GAIN="max"
+DUMP1090_PORT="30003"
+DUMP1090_EXTRA_ARGS=""
+
+# ---------------------------------------------------------------------------
+# OP25  (P25 on port 23456)
+# ---------------------------------------------------------------------------
+OP25_FREQUENCY="851M"
+OP25_GAIN="auto"
+OP25_PORT="23456"
+OP25_EXTRA_ARGS=""
