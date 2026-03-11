@@ -59,11 +59,12 @@ fi
 # Pinning avoids upstream changes breaking our patches.  To update, change the
 # hash below, delete build/pi-gen, and rebuild.
 PIGEN_DIR="${PROJECT_DIR}/build/pi-gen"
-PIGEN_COMMIT="567a833b10af16931d12cfce9fe9b7a72c7cfce1"
+PIGEN_BRANCH="bookworm"
+PIGEN_COMMIT="de9df5623109331cebf990578f342583d9138376"
 if [[ ! -d "$PIGEN_DIR" ]]; then
-    echo ">>> Cloning pi-gen (${PIGEN_COMMIT:0:7})..."
+    echo ">>> Cloning pi-gen (${PIGEN_BRANCH} @ ${PIGEN_COMMIT:0:7})..."
     mkdir -p "${PROJECT_DIR}/build"
-    git clone https://github.com/RPi-Distro/pi-gen.git "$PIGEN_DIR"
+    git clone --branch "$PIGEN_BRANCH" https://github.com/RPi-Distro/pi-gen.git "$PIGEN_DIR"
     git -C "$PIGEN_DIR" checkout "$PIGEN_COMMIT"
 fi
 
@@ -182,8 +183,8 @@ echo ">>> ccache volume: ${CCACHE_DIR} → /ccache"
 # image here lets us detect Docker networking / DNS problems early and give a
 # clear error message instead of a cryptic Dockerfile build failure.
 case "$(uname -m)" in
-    x86_64|aarch64) BASE_IMAGE="i386/debian:trixie" ;;
-    *)              BASE_IMAGE="debian:trixie" ;;
+    x86_64|aarch64) BASE_IMAGE="i386/debian:bookworm" ;;
+    *)              BASE_IMAGE="debian:bookworm" ;;
 esac
 if ! docker image inspect "$BASE_IMAGE" &>/dev/null; then
     echo ">>> Pulling base image ${BASE_IMAGE}..."
