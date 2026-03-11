@@ -5,6 +5,20 @@
 #   - Docker installed and running
 #   - ~10 GB free disk space
 #
+# Environment variables:
+#   SDR_PI_CONF          Path to custom sdr-pi.conf (default: sdr-pi.conf.default)
+#   SDR_PI_SSH_PASSWORD   SSH password for sdr user (default: sdr)
+#   SDR_PI_APT_CACHE      apt-cacher-ng URL (e.g. http://192.168.1.10:3142)
+#   SDR_PI_CONTINUE       Set to 1 to resume a previous build (skip completed stages)
+#   SDR_PI_CLEAN          Set to 1 to wipe previous build state before starting
+#
+# Build acceleration:
+#   - QEMU binfmt_misc registered automatically for ARM user-mode emulation
+#   - ccache volume mounted at /ccache (persisted in build/ccache/)
+#   - eatmydata disables fsync() inside the chroot (expensive under QEMU)
+#   - rtl_433, dump1090, and OP25 compile in parallel after librtlsdr
+#   - --no-install-recommends reduces package count
+#
 # Usage: ./scripts/build-image.sh
 set -euo pipefail
 
@@ -21,12 +35,52 @@ if ! docker info &>/dev/null; then
     exit 1
 fi
 
+# ── Warn if running from NTFS (Windows) filesystem ──────────────────────────
+# The Windows ↔ Linux filesystem bridge is extremely slow for I/O-heavy builds.
+if [[ "$PROJECT_DIR" == /mnt/[a-z]/* ]]; then
+    echo "WARNING: Project is on the Windows filesystem ($PROJECT_DIR)." >&2
+    echo "         Build I/O will be up to 20x slower than on the Linux FS." >&2
+    echo "         Consider cloning to ~/src/sdr-pi instead." >&2
+    echo ""
+fi
+
+# ── QEMU binfmt_misc setup ────────────────────────────────────────────────
+# Register QEMU user-mode emulation so the Docker container can run ARM
+# binaries in the pi-gen chroot without a full VM.  This is a no-op if
+# already registered (e.g. Docker Desktop on macOS/Windows).
+if [[ "$(uname -m)" != "aarch64" ]]; then
+    if ! docker run --rm --privileged tonistiigi/binfmt:latest --install arm64,arm 2>/dev/null; then
+        echo "Warning: Could not register QEMU binfmt_misc handlers." >&2
+        echo "         Cross-architecture builds may fail." >&2
+    fi
+fi
+
 # ── Clone pi-gen if needed ───────────────────────────────────────────────────
 PIGEN_DIR="${PROJECT_DIR}/build/pi-gen"
 if [[ ! -d "$PIGEN_DIR" ]]; then
     echo ">>> Cloning pi-gen..."
     mkdir -p "${PROJECT_DIR}/build"
     git clone --depth 1 https://github.com/RPi-Distro/pi-gen.git "$PIGEN_DIR"
+fi
+
+# ── Patch pi-gen for Docker DNS reliability ─────────────────────────────────
+# pi-gen's build-docker.sh runs `docker build` without DNS flags.  On WSL2 /
+# Docker Desktop the default DNS resolver ([::1]:53) often fails.  Inject
+# --dns 8.8.8.8 into the docker build and docker run commands so image pulls
+# and in-container apt-get work regardless of host DNS configuration.
+PIGEN_BUILD_DOCKER="${PIGEN_DIR}/build-docker.sh"
+if ! grep -q -- '--dns' "$PIGEN_BUILD_DOCKER" 2>/dev/null; then
+    echo ">>> Patching pi-gen build-docker.sh for DNS reliability..."
+    # Add --dns to the `docker build` command (no env-var hook exists for it).
+    # The literal ${DOCKER} is intentional — we match the text in the file.
+    # shellcheck disable=SC2016
+    sed -i 's|${DOCKER} build --build-arg|${DOCKER} build --dns 8.8.8.8 --build-arg|' "$PIGEN_BUILD_DOCKER"
+fi
+
+# ── Clean previous build if requested ────────────────────────────────────────
+if [[ "${SDR_PI_CLEAN:-0}" == "1" ]]; then
+    echo ">>> Cleaning previous build state..."
+    rm -rf "${PIGEN_DIR}/work" "${PIGEN_DIR}/deploy"
 fi
 
 # ── Write pi-gen config ─────────────────────────────────────────────────────
@@ -43,6 +97,19 @@ TIMEZONE_DEFAULT=UTC
 # Skip desktop stages (3–5) — headless only.
 STAGE_LIST="stage0 stage1 stage2 stage-sdr-pi"
 EOF
+
+# ── apt-cacher-ng ────────────────────────────────────────────────────────────
+# Point pi-gen at a local apt cache to avoid re-downloading ~500 MB of packages
+# on every rebuild.  Set SDR_PI_APT_CACHE to your apt-cacher-ng URL, e.g.:
+#   export SDR_PI_APT_CACHE=http://192.168.1.10:3142
+#
+# To run apt-cacher-ng locally:
+#   docker run -d -p 3142:3142 --name apt-cache -v apt-cache:/var/cache/apt-cacher-ng sameersbn/apt-cacher-ng
+#   export SDR_PI_APT_CACHE=http://host.docker.internal:3142
+if [[ -n "${SDR_PI_APT_CACHE:-}" ]]; then
+    echo ">>> Using apt cache: ${SDR_PI_APT_CACHE}"
+    echo "APT_PROXY=${SDR_PI_APT_CACHE}" >> "${PIGEN_DIR}/config"
+fi
 
 # ── Copy our custom stage into pi-gen ─────────────────────────────────────────
 # Must be a real copy (not symlink) because Docker COPY won't follow symlinks
@@ -65,10 +132,64 @@ cp "${PROJECT_DIR}/scripts/sdr-pi-status"              "${STAGE_FILES}/"
 cp "${PROJECT_DIR}/config/sysctl.d/99-sdr-pi.conf"    "${STAGE_FILES}/"
 cp "${PROJECT_DIR}/config/modprobe.d/99-sdr-pi-usb.conf" "${STAGE_FILES}/"
 cp "${PROJECT_DIR}/config/boot/config.txt.sdr-pi"     "${STAGE_FILES}/"
+cp "${PROJECT_DIR}/config/boot/cmdline.txt.sdr-pi"    "${STAGE_FILES}/"
+cp "${PROJECT_DIR}/config/journald/journald.conf.override" "${STAGE_FILES}/"
+cp "${PROJECT_DIR}/config/fstab/sdr-pi.fstab"         "${STAGE_FILES}/"
 
 # Skip stages 3-5 (desktop and full environment — not needed for headless).
 touch "${PIGEN_DIR}/stage3/SKIP" "${PIGEN_DIR}/stage4/SKIP" "${PIGEN_DIR}/stage5/SKIP"
 touch "${PIGEN_DIR}/stage3/SKIP_IMAGES" "${PIGEN_DIR}/stage4/SKIP_IMAGES" "${PIGEN_DIR}/stage5/SKIP_IMAGES"
+
+# ── Stage skipping — resume from previous build ─────────────────────────────
+# pi-gen creates a SKIP file in each completed stage's work directory.  When
+# SDR_PI_CONTINUE=1, we mark base stages (0–2) as skippable if their work
+# directory already exists, so only our custom stage is rebuilt.  This cuts
+# rebuild time from ~60 min to ~10 min after the first full build.
+if [[ "${SDR_PI_CONTINUE:-0}" == "1" ]]; then
+    echo ">>> Continuing previous build (skipping completed stages)..."
+    export CONTINUE=1
+    for stage_num in 0 1 2; do
+        work_dir="${PIGEN_DIR}/work/sdr-pi/stage${stage_num}"
+        if [[ -d "$work_dir" ]]; then
+            echo "    Skipping stage${stage_num} (already built)"
+            touch "${PIGEN_DIR}/stage${stage_num}/SKIP"
+        fi
+    done
+fi
+
+# ── ccache volume ────────────────────────────────────────────────────────────
+# Mount a persistent ccache directory into the pi-gen container so compiled
+# objects survive across rebuilds.  On a second build with unchanged sources,
+# this turns ~30 min of compilation into seconds.
+#
+# pi-gen's build-docker.sh passes PIGEN_DOCKER_OPTS to `docker run`.
+CCACHE_DIR="${PROJECT_DIR}/build/ccache"
+mkdir -p "$CCACHE_DIR"
+export PIGEN_DOCKER_OPTS="${PIGEN_DOCKER_OPTS:-} -v ${CCACHE_DIR}:/ccache --dns 8.8.8.8"
+echo ">>> ccache volume: ${CCACHE_DIR} → /ccache"
+
+# ── Pre-pull pi-gen base image ──────────────────────────────────────────────
+# pi-gen's build-docker.sh uses i386/debian on 64-bit hosts.  Pre-pulling the
+# image here lets us detect Docker networking / DNS problems early and give a
+# clear error message instead of a cryptic Dockerfile build failure.
+case "$(uname -m)" in
+    x86_64|aarch64) BASE_IMAGE="i386/debian:bookworm" ;;
+    *)              BASE_IMAGE="debian:bookworm" ;;
+esac
+if ! docker image inspect "$BASE_IMAGE" &>/dev/null; then
+    echo ">>> Pulling base image ${BASE_IMAGE}..."
+    if ! docker pull "$BASE_IMAGE"; then
+        echo "" >&2
+        echo "ERROR: Failed to pull ${BASE_IMAGE}." >&2
+        echo "       This is usually a Docker DNS problem (common on WSL2)." >&2
+        echo "       Fixes to try:" >&2
+        echo "         1. Restart Docker Desktop" >&2
+        echo "         2. In Docker Desktop → Settings → Docker Engine, add:" >&2
+        echo '            "dns": ["8.8.8.8", "8.8.4.4"]' >&2
+        echo "         3. Check your internet connection" >&2
+        exit 1
+    fi
+fi
 
 # ── Build ────────────────────────────────────────────────────────────────────
 echo ">>> Starting pi-gen Docker build..."

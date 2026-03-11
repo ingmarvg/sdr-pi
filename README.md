@@ -2,7 +2,7 @@
 
 Custom Raspberry Pi OS image for headless SDR capture with RTL-SDR dongles.
 The Pi operates as a standalone Wi-Fi access point — phones running the
-[Spider](https://github.com/pierce403/urchin) Android app connect directly to
+[Urchin](https://github.com/pierce403/urchin) Android app connect directly to
 it and receive live observations over TCP.
 
 ## Supported protocols
@@ -44,13 +44,87 @@ after installation):
 
 The build uses [pi-gen](https://github.com/RPi-Distro/pi-gen) inside Docker
 to produce a complete Raspberry Pi OS image with all SDR tools pre-installed.
-This takes 30–60 minutes depending on your machine.
+The first build takes 30–60 minutes; subsequent rebuilds are much faster with
+stage skipping and apt caching (see below).
 
 The resulting image is written to:
 
 ```
 deploy/sdr-pi-<date>.img
 ```
+
+### Faster rebuilds
+
+The build script registers QEMU user-mode emulation via `binfmt_misc`
+automatically so ARM binaries run in the chroot without a full VM. On
+Linux hosts with KVM support, Docker uses hardware-accelerated emulation.
+
+**Skip unchanged stages** — after a successful build, the base OS stages
+(0–2) are cached. Set `SDR_PI_CONTINUE=1` to skip them and only rebuild
+the sdr-pi stage (~10 min instead of ~60 min):
+
+```bash
+SDR_PI_CONTINUE=1 ./scripts/build-image.sh
+```
+
+**apt-cacher-ng** — avoid re-downloading ~500 MB of packages on every
+build by running a local apt cache:
+
+```bash
+# Start a cache container (one-time)
+docker run -d -p 3142:3142 --name apt-cache \
+    -v apt-cache:/var/cache/apt-cacher-ng sameersbn/apt-cacher-ng
+
+# Point the build at it
+SDR_PI_APT_CACHE=http://host.docker.internal:3142 ./scripts/build-image.sh
+```
+
+**ccache** — compiled object files are cached in `build/ccache/` and
+automatically mounted into the Docker container. On rebuilds where the
+SDR source hasn't changed, compilation drops from minutes to seconds.
+No configuration needed — it works out of the box.
+
+**eatmydata** — installed automatically inside the chroot to skip
+`fsync()` calls, which QEMU emulates slowly. Speeds up `apt-get` and
+compilation I/O by 10–20%.
+
+**Parallel compilation** — after librtlsdr is built, rtl_433, dump1090,
+and OP25 compile concurrently.
+
+**Clean build** — wipe all cached state and start fresh:
+
+```bash
+SDR_PI_CLEAN=1 ./scripts/build-image.sh
+```
+
+All options can be combined:
+
+```bash
+SDR_PI_CONTINUE=1 SDR_PI_APT_CACHE=http://host.docker.internal:3142 ./scripts/build-image.sh
+```
+
+### WSL2 performance tips
+
+If building on Windows with WSL2, these settings make a significant
+difference:
+
+1. **Keep files on the Linux filesystem.** Clone the repo inside WSL2
+   (e.g. `~/src/sdr-pi`), not on `/mnt/c/`. The NTFS bridge is up to
+   20x slower for I/O-heavy builds.
+
+2. **Allocate sufficient resources.** Create or edit
+   `C:\Users\<you>\.wslconfig`:
+
+   ```ini
+   [wsl2]
+   memory=16GB
+   processors=8
+   swap=4GB
+   ```
+
+3. **Exclude from Windows Defender.** Add the WSL2 VHD path and Docker
+   data directory to Defender's exclusion list — real-time scanning adds
+   measurable overhead to every file operation during compilation.
 
 ### Alternative: install on an existing Raspberry Pi OS
 
@@ -336,11 +410,11 @@ Check status:
 sudo systemctl status rtl-tcp
 ```
 
-## Connecting Spider
+## Connecting Urchin
 
 1. On your Android device, connect to the `sdr-pi` Wi-Fi network.
-2. In Spider, go to Settings and set the bridge host to `192.168.4.1`.
-3. Ports are pre-configured to match Spider's defaults (1234, 30003, 23456).
+2. In Urchin, go to Settings and set the bridge host to `192.168.4.1`.
+3. Ports are pre-configured to match Urchin's defaults (1234, 30003, 23456).
 
 ## Hardware
 
