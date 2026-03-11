@@ -1,5 +1,6 @@
 # RTL-SDR Blog V3/V4
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", GROUP="plugdev", MODE="0660", SYMLINK+="rtlsdr-%k"
+# Disable USB autosuspend per-device to prevent mid-capture dropouts.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", GROUP="plugdev", MODE="0660", SYMLINK+="rtlsdr-%k", ATTR{power/autosuspend}="-1", ATTR{power/control}="on"
 
 # HackRF One
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="6089", GROUP="plugdev", MODE="0660", SYMLINK+="hackrf-%k"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="6089", GROUP="plugdev", MODE="0660", SYMLINK+="hackrf-%k", ATTR{power/autosuspend}="-1", ATTR{power/control}="on"

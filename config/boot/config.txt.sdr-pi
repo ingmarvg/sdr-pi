@@ -1,0 +1,24 @@
+
+# sdr-pi performance tuning
+# Appended to /boot/firmware/config.txt (or /boot/config.txt on older Pi OS).
+
+# Minimize GPU memory — headless, no display needed.
+# 16 MB is the minimum. Frees ~240 MB for SDR buffers.
+gpu_mem=16
+
+# Disable unused peripherals to free USB bandwidth and reduce power draw.
+dtoverlay=disable-bt
+dtparam=audio=off
+
+# Enable maximum USB current output (Pi 3B+ only, ignored on Pi 4/5).
+# Required when powering multiple RTL-SDR dongles from the Pi's USB ports.
+max_usb_current=1
+
+# Disable dynamic frequency scaling — run all cores at maximum clock.
+# Prevents frequency ramp-up latency from causing USB buffer overflows.
+# A heatsink or fan is mandatory with this setting.
+force_turbo=1
+
+# Raise thermal throttle threshold from 80C to 85C.
+# The Pi will still emergency-shutdown at 90C.
+temp_soft_limit=85

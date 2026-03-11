@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Wrapper for dump1090 that reads sdr-pi.conf and serves SBS over TCP.
+set -euo pipefail
+
+source /etc/sdr-pi/sdr-pi.conf
+
+DEVICE_ARG=""
+if [[ -n "${DUMP1090_DEVICE_SERIAL:-}" ]]; then
+    # dump1090-mutability --device-index only accepts a numeric index.
+    # Resolve the serial number to a device index via rtl_test.
+    DEV_INDEX=$(timeout 2 rtl_test 2>&1 \
+        | grep -m1 "SN: ${DUMP1090_DEVICE_SERIAL}" \
+        | sed 's/^[[:space:]]*\([0-9]*\):.*/\1/' || true)
+    if [[ -z "$DEV_INDEX" ]]; then
+        echo "Error: RTL-SDR with serial '${DUMP1090_DEVICE_SERIAL}' not found" >&2
+        exit 1
+    fi
+    DEVICE_ARG="--device-index ${DEV_INDEX}"
+fi
+
+GAIN_ARG=""
+case "${DUMP1090_GAIN:-max}" in
+    max)  GAIN_ARG="--gain -10" ;;
+    auto) GAIN_ARG="--enable-agc" ;;
+    *)    GAIN_ARG="--gain ${DUMP1090_GAIN}" ;;
+esac
+
+# NOTE: DUMP1090_EXTRA_ARGS is intentionally unquoted to allow word-splitting
+# into separate arguments. Values must not contain shell metacharacters.
+exec dump1090-mutability \
+    --net \
+    --net-sbs-port "${DUMP1090_PORT:-30003}" \
+    --quiet \
+    ${DEVICE_ARG} \
+    ${GAIN_ARG} \
+    ${DUMP1090_EXTRA_ARGS:-}

@@ -42,7 +42,7 @@ after installation):
 ./scripts/build-image.sh
 ```
 
-The build uses [pi-gen](https://github.com/RPi-Distillery/pi-gen) inside Docker
+The build uses [pi-gen](https://github.com/RPi-Distro/pi-gen) inside Docker
 to produce a complete Raspberry Pi OS image with all SDR tools pre-installed.
 This takes 30–60 minutes depending on your machine.
 

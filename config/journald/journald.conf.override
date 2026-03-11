@@ -1,0 +1,5 @@
+# sdr-pi: keep journal in RAM only to avoid SD card writes.
+# Installed to /etc/systemd/journald.conf.d/sdr-pi.conf
+[Journal]
+Storage=volatile
+RuntimeMaxUse=16M

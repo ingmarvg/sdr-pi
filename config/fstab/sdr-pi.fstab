@@ -1,0 +1,6 @@
+# sdr-pi tmpfs mounts — eliminate SD card writes from logs and temp files.
+# Appended to /etc/fstab during image build.
+
+tmpfs /tmp     tmpfs defaults,noatime,nosuid,nodev,size=64M 0 0
+tmpfs /var/log tmpfs defaults,noatime,nosuid,nodev,size=32M 0 0
+tmpfs /var/tmp tmpfs defaults,noatime,nosuid,nodev,size=16M 0 0

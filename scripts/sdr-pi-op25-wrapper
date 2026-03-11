@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Wrapper for OP25 that reads sdr-pi.conf and serves P25 JSON over TCP.
+set -euo pipefail
+
+source /etc/sdr-pi/sdr-pi.conf
+
+DEVICE_ARG=""
+if [[ -n "${OP25_DEVICE_SERIAL:-}" ]]; then
+    DEVICE_ARG="--args rtl=${OP25_DEVICE_SERIAL}"
+fi
+
+GAIN_ARG=""
+if [[ "${OP25_GAIN:-auto}" != "auto" ]]; then
+    GAIN_ARG="-g ${OP25_GAIN}"
+fi
+
+# NOTE: OP25_EXTRA_ARGS is intentionally unquoted to allow word-splitting
+# into separate arguments. Values must not contain shell metacharacters.
+exec rx.py \
+    -f "${OP25_FREQUENCY:-851M}" \
+    --tcp-port "${OP25_PORT:-23456}" \
+    ${DEVICE_ARG} \
+    ${GAIN_ARG} \
+    ${OP25_EXTRA_ARGS:-}

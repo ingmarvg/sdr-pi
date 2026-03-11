@@ -1,7 +1,8 @@
 [Unit]
 Description=sdr-pi rtl_433 TCP bridge (TPMS + POCSAG)
-After=network-online.target
+After=network-online.target sdr-pi-performance.service
 Wants=network-online.target
+Requires=sdr-pi-performance.service
 
 [Service]
 Type=simple
@@ -11,6 +12,14 @@ Restart=on-failure
 RestartSec=5
 User=sdr
 Group=plugdev
+
+# SDR performance tuning — pin to dedicated core, elevate priority,
+# lock sample buffers in RAM. Core 0 is reserved for USB IRQs.
+Nice=-10
+CPUAffinity=1
+LimitRTPRIO=50
+LimitMEMLOCK=infinity
+LimitNOFILE=8192
 
 [Install]
 WantedBy=multi-user.target

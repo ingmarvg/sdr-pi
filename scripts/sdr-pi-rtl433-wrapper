@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Wrapper for rtl_433 that reads sdr-pi.conf and serves JSON over TCP.
+set -euo pipefail
+
+source /etc/sdr-pi/sdr-pi.conf
+
+DEVICE_ARG=""
+if [[ -n "${RTL433_DEVICE_SERIAL:-}" ]]; then
+    DEVICE_ARG="-d :${RTL433_DEVICE_SERIAL}"
+fi
+
+GAIN_ARG=""
+if [[ "${RTL433_GAIN:-auto}" != "auto" ]]; then
+    GAIN_ARG="-g ${RTL433_GAIN}"
+fi
+
+# NOTE: RTL433_EXTRA_ARGS is intentionally unquoted to allow word-splitting
+# into separate arguments. Values must not contain shell metacharacters.
+exec rtl_433 \
+    -f "${RTL433_FREQUENCY:-315M}" \
+    ${DEVICE_ARG} \
+    ${GAIN_ARG} \
+    -F "json:tcp://0.0.0.0:${RTL433_PORT:-1234}" \
+    ${RTL433_EXTRA_ARGS:-}

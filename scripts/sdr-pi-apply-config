@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Apply sdr-pi.conf settings to system configuration files.
+# Generates hostapd.conf and dnsmasq.conf, and enables/disables services
+# based on ENABLED_PROTOCOLS.
+#
+# Usage: sudo sdr-pi-apply-config
+set -euo pipefail
+
+if [[ "$(id -u)" -ne 0 ]]; then
+    echo "Error: This script must be run as root (use sudo)." >&2
+    exit 1
+fi
+
+CONF="/etc/sdr-pi/sdr-pi.conf"
+if [[ ! -f "$CONF" ]]; then
+    echo "Error: $CONF not found." >&2
+    exit 1
+fi
+
+source "$CONF"
+
+# ── Generate hostapd.conf ───────────────────────────────────────────────────
+echo ">>> Configuring access point (SSID=${AP_SSID:-sdr-pi})..."
+mkdir -p /etc/hostapd
+cat > /etc/hostapd/hostapd.conf <<EOF
+interface=wlan0
+driver=nl80211
+ssid=${AP_SSID:-sdr-pi}
+hw_mode=g
+channel=${AP_CHANNEL:-7}
+wmm_enabled=0
+macaddr_acl=0
+auth_algs=1
+ignore_broadcast_ssid=0
+wpa=2
+wpa_passphrase=${AP_PASSWORD:-sdr-pi-pass}
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+EOF
+
+# Point hostapd at the config file.
+if [[ -f /etc/default/hostapd ]]; then
+    sed -i 's|^#\?DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' \
+        /etc/default/hostapd
+fi
+
+# ── Generate dnsmasq.conf ───────────────────────────────────────────────────
+AP_IP="${AP_IP:-192.168.4.1}"
+AP_SUBNET="${AP_IP%.*}"
+
+echo ">>> Configuring DHCP (${AP_SUBNET}.2-${AP_SUBNET}.20)..."
+cat > /etc/dnsmasq.d/sdr-pi.conf <<EOF
+# Serve DHCP only on the AP interface — not on eth0.
+interface=wlan0
+bind-interfaces
+
+dhcp-range=${AP_SUBNET}.2,${AP_SUBNET}.20,255.255.255.0,24h
+domain=local
+address=/sdr-pi.local/${AP_IP}
+EOF
+
+# ── Configure network interfaces ─────────────────────────────────────────────
+# eth0: DHCP (default) — for upstream internet / SSH access during development.
+# wlan0: static IP — runs the access point for client devices.
+if ! grep -q "# sdr-pi network" /etc/dhcpcd.conf 2>/dev/null; then
+    echo ">>> Configuring eth0 (DHCP) and wlan0 (static ${AP_IP})..."
+    cat >> /etc/dhcpcd.conf <<EOF
+
+# sdr-pi network
+# eth0 uses DHCP by default — no configuration needed.
+# Explicitly prevent dhcpcd from touching wlan0 (hostapd manages it).
+interface wlan0
+    static ip_address=${AP_IP}/24
+    nohook wpa_supplicant
+EOF
+fi
+
+# ── Enable/disable services based on ENABLED_PROTOCOLS ──────────────────────
+ENABLE_RTL433=false
+ENABLE_DUMP1090=false
+ENABLE_OP25=false
+
+for proto in ${ENABLED_PROTOCOLS:-}; do
+    case "$proto" in
+        tpms|pocsag) ENABLE_RTL433=true ;;
+        adsb)        ENABLE_DUMP1090=true ;;
+        p25)         ENABLE_OP25=true ;;
+        *)           echo "Warning: unknown protocol '${proto}'" >&2 ;;
+    esac
+done
+
+apply_service() {
+    local service="$1" enabled="$2"
+    if $enabled; then
+        echo "    Enabling ${service}..."
+        systemctl enable "$service" 2>/dev/null
+    else
+        echo "    Disabling ${service}..."
+        systemctl disable "$service" 2>/dev/null || true
+    fi
+}
+
+apply_service sdr-pi-rtl433  "$ENABLE_RTL433"
+apply_service sdr-pi-dump1090 "$ENABLE_DUMP1090"
+apply_service sdr-pi-op25    "$ENABLE_OP25"
+
+systemctl enable hostapd 2>/dev/null || true
+systemctl enable dnsmasq 2>/dev/null || true
+systemctl enable sdr-pi-performance 2>/dev/null || true
+
+echo ">>> Configuration applied. Reboot or restart services to take effect."

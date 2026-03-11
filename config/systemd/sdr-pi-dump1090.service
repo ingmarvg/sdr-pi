@@ -1,7 +1,8 @@
 [Unit]
 Description=sdr-pi dump1090 ADS-B receiver
-After=network-online.target
+After=network-online.target sdr-pi-performance.service
 Wants=network-online.target
+Requires=sdr-pi-performance.service
 
 [Service]
 Type=simple
@@ -11,6 +12,15 @@ Restart=on-failure
 RestartSec=5
 User=sdr
 Group=plugdev
+
+# SDR performance tuning — pin to dedicated core, elevate priority,
+# lock sample buffers in RAM. Core 0 is reserved for USB IRQs.
+# Core 2 for dump1090 (highest bandwidth decoder at 2.4 Msps).
+Nice=-10
+CPUAffinity=2
+LimitRTPRIO=50
+LimitMEMLOCK=infinity
+LimitNOFILE=8192
 
 [Install]
 WantedBy=multi-user.target

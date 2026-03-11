@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Show the status of all sdr-pi services.
+# Usage: sdr-pi-status
+set -euo pipefail
+
+CONF="/etc/sdr-pi/sdr-pi.conf"
+if [[ -f "$CONF" ]]; then
+    source "$CONF"
+    echo "Enabled protocols: ${ENABLED_PROTOCOLS:-<none>}"
+    echo ""
+fi
+
+SERVICES=(sdr-pi-rtl433 sdr-pi-dump1090 sdr-pi-op25 hostapd dnsmasq)
+
+printf "%-22s %-10s %-10s %s\n" "SERVICE" "ENABLED" "ACTIVE" "STATUS"
+printf "%-22s %-10s %-10s %s\n" "-------" "-------" "------" "------"
+
+for svc in "${SERVICES[@]}"; do
+    enabled=$(systemctl is-enabled "$svc" 2>/dev/null || echo "n/a")
+    active=$(systemctl is-active "$svc" 2>/dev/null || echo "n/a")
+
+    status=""
+    if [[ "$active" == "active" ]]; then
+        # Show uptime
+        status=$(systemctl show "$svc" --property=ActiveEnterTimestamp \
+            --value 2>/dev/null || true)
+    elif [[ "$active" == "failed" ]]; then
+        # Show last log line
+        status=$(journalctl -u "$svc" -n1 --no-pager -o cat 2>/dev/null || true)
+    fi
+
+    printf "%-22s %-10s %-10s %s\n" "$svc" "$enabled" "$active" "$status"
+done
+
+echo ""
+echo "RTL-SDR devices:"
+if command -v rtl_test &>/dev/null; then
+    timeout 2 rtl_test 2>&1 | grep -E "^Found|^  [0-9]" || echo "  No devices found."
+else
+    echo "  rtl_test not installed."
+fi
