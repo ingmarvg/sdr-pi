@@ -55,25 +55,35 @@ if [[ "$(uname -m)" != "aarch64" ]]; then
     fi
 fi
 
-# ── Clone pi-gen if needed ───────────────────────────────────────────────────
+# ── Clone pi-gen (pinned to a known-good commit) ────────────────────────────
+# Pinning avoids upstream changes breaking our patches.  To update, change the
+# hash below, delete build/pi-gen, and rebuild.
 PIGEN_DIR="${PROJECT_DIR}/build/pi-gen"
+PIGEN_COMMIT="567a833b10af16931d12cfce9fe9b7a72c7cfce1"
 if [[ ! -d "$PIGEN_DIR" ]]; then
-    echo ">>> Cloning pi-gen..."
+    echo ">>> Cloning pi-gen (${PIGEN_COMMIT:0:7})..."
     mkdir -p "${PROJECT_DIR}/build"
-    git clone --depth 1 https://github.com/RPi-Distro/pi-gen.git "$PIGEN_DIR"
+    git clone https://github.com/RPi-Distro/pi-gen.git "$PIGEN_DIR"
+    git -C "$PIGEN_DIR" checkout "$PIGEN_COMMIT"
 fi
 
-# ── Patch pi-gen for Docker DNS reliability ─────────────────────────────────
-# pi-gen's build-docker.sh runs `docker build` without DNS flags.  On WSL2 /
-# Docker Desktop the default DNS resolver ([::1]:53) often fails.  Use
-# --network=host so the build inherits the host's /etc/resolv.conf (which we
-# already fixed to use 8.8.8.8).  BuildKit (`docker buildx build`) does not
-# support --dns, but does support --network.
+# ── Patch pi-gen build-docker.sh ─────────────────────────────────────────────
+# Fixes for WSL2 / Docker Desktop:
+#   1. DNS: use --network=host for `docker build` so it inherits the host's
+#      /etc/resolv.conf.  BuildKit doesn't support --dns, but does --network.
+#   2. binfmt: pi-gen checks for `qemu-arm` on the host, but on WSL2 + Docker
+#      Desktop the binfmt handlers are registered inside the Docker VM (via
+#      tonistiigi/binfmt) and aren't visible at /proc/sys/fs/binfmt_misc.
+#      The container already runs `dpkg-reconfigure qemu-user-binfmt` so the
+#      host-side check is unnecessary.
 PIGEN_BUILD_DOCKER="${PIGEN_DIR}/build-docker.sh"
-if ! grep -q -- '--network' "$PIGEN_BUILD_DOCKER" 2>/dev/null; then
-    echo ">>> Patching pi-gen build-docker.sh for DNS reliability..."
+if ! grep -q 'sdr-pi-patched' "$PIGEN_BUILD_DOCKER" 2>/dev/null; then
+    echo ">>> Patching pi-gen build-docker.sh (DNS + binfmt)..."
+    # 1. Add --network=host to docker build (BuildKit doesn't support --dns)
     # shellcheck disable=SC2016
-    sed -i 's|${DOCKER} build |${DOCKER} build --network=host |' "$PIGEN_BUILD_DOCKER"
+    sed -i 's|${DOCKER} build --build-arg|${DOCKER} build --network=host --build-arg|' "$PIGEN_BUILD_DOCKER"
+    # 2. Skip host-side binfmt check — handled by tonistiigi/binfmt + container
+    sed -i 's|binfmt_misc_required=1|binfmt_misc_required=0  # sdr-pi-patched|' "$PIGEN_BUILD_DOCKER"
 fi
 
 # ── Clean previous build if requested ────────────────────────────────────────
@@ -172,8 +182,8 @@ echo ">>> ccache volume: ${CCACHE_DIR} → /ccache"
 # image here lets us detect Docker networking / DNS problems early and give a
 # clear error message instead of a cryptic Dockerfile build failure.
 case "$(uname -m)" in
-    x86_64|aarch64) BASE_IMAGE="i386/debian:bookworm" ;;
-    *)              BASE_IMAGE="debian:bookworm" ;;
+    x86_64|aarch64) BASE_IMAGE="i386/debian:trixie" ;;
+    *)              BASE_IMAGE="debian:trixie" ;;
 esac
 if ! docker image inspect "$BASE_IMAGE" &>/dev/null; then
     echo ">>> Pulling base image ${BASE_IMAGE}..."
