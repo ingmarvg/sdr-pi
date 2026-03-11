@@ -9,6 +9,14 @@
 ENABLED_PROTOCOLS="tpms adsb"
 
 # ---------------------------------------------------------------------------
+# Access point
+# ---------------------------------------------------------------------------
+AP_SSID="sdr-pi"
+AP_PASSWORD="sdr-pi-pass"
+AP_CHANNEL="7"
+AP_IP="192.168.4.1"
+
+# ---------------------------------------------------------------------------
 # RTL-SDR device assignment
 # Use `rtl_test` to find device serial numbers.
 # Leave blank for auto-assignment.
@@ -23,7 +31,8 @@ OP25_DEVICE_SERIAL=""
 RTL433_FREQUENCY="315M"
 RTL433_GAIN="auto"
 RTL433_PORT="1234"
-# Additional rtl_433 flags (e.g. "-R 59 -R 60" to limit decoders)
+# Additional rtl_433 flags (e.g. "-R 59 -R 60" to limit decoders).
+# Values are word-split on spaces; do not use shell metacharacters.
 RTL433_EXTRA_ARGS=""
 
 # ---------------------------------------------------------------------------
@@ -31,6 +40,7 @@ RTL433_EXTRA_ARGS=""
 # ---------------------------------------------------------------------------
 DUMP1090_GAIN="max"
 DUMP1090_PORT="30003"
+# Values are word-split on spaces; do not use shell metacharacters.
 DUMP1090_EXTRA_ARGS=""
 
 # ---------------------------------------------------------------------------
@@ -39,4 +49,5 @@ DUMP1090_EXTRA_ARGS=""
 OP25_FREQUENCY="851M"
 OP25_GAIN="auto"
 OP25_PORT="23456"
+# Values are word-split on spaces; do not use shell metacharacters.
 OP25_EXTRA_ARGS=""

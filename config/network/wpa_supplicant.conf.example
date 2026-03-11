@@ -2,6 +2,10 @@ country=US
 ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
 update_config=1
 
+# This file is only needed if you want to connect the Pi to an upstream
+# Wi-Fi network (e.g. for internet access during development).
+# In normal operation the Pi runs as an access point and this file is not used.
+
 network={
     ssid="YOUR_SSID"
     psk="YOUR_PASSWORD"
