@@ -65,16 +65,15 @@ fi
 
 # ── Patch pi-gen for Docker DNS reliability ─────────────────────────────────
 # pi-gen's build-docker.sh runs `docker build` without DNS flags.  On WSL2 /
-# Docker Desktop the default DNS resolver ([::1]:53) often fails.  Inject
-# --dns 8.8.8.8 into the docker build and docker run commands so image pulls
-# and in-container apt-get work regardless of host DNS configuration.
+# Docker Desktop the default DNS resolver ([::1]:53) often fails.  Use
+# --network=host so the build inherits the host's /etc/resolv.conf (which we
+# already fixed to use 8.8.8.8).  BuildKit (`docker buildx build`) does not
+# support --dns, but does support --network.
 PIGEN_BUILD_DOCKER="${PIGEN_DIR}/build-docker.sh"
-if ! grep -q -- '--dns' "$PIGEN_BUILD_DOCKER" 2>/dev/null; then
+if ! grep -q -- '--network' "$PIGEN_BUILD_DOCKER" 2>/dev/null; then
     echo ">>> Patching pi-gen build-docker.sh for DNS reliability..."
-    # Add --dns to the `docker build` command (no env-var hook exists for it).
-    # The literal ${DOCKER} is intentional — we match the text in the file.
     # shellcheck disable=SC2016
-    sed -i 's|${DOCKER} build --build-arg|${DOCKER} build --dns 8.8.8.8 --build-arg|' "$PIGEN_BUILD_DOCKER"
+    sed -i 's|${DOCKER} build |${DOCKER} build --network=host |' "$PIGEN_BUILD_DOCKER"
 fi
 
 # ── Clean previous build if requested ────────────────────────────────────────
