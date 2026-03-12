@@ -201,12 +201,17 @@ if ! docker image inspect "$BASE_IMAGE" &>/dev/null; then
     fi
 fi
 
-# ── Clean up stale Docker container ─────────────────────────────────────────
+# ── Handle stale Docker container ───────────────────────────────────────────
 # pi-gen's build-docker.sh refuses to start if a container from a previous
-# (possibly failed) build still exists.  Remove it automatically.
+# (possibly failed) build still exists.  When continuing, keep the container
+# (pi-gen reuses its volumes to skip completed work).  Otherwise remove it.
 if docker ps -a --filter name=pigen_work -q | grep -q .; then
-    echo ">>> Removing stale pigen_work container..."
-    docker rm -v pigen_work >/dev/null
+    if [[ "${SDR_PI_CONTINUE:-0}" == "1" ]]; then
+        echo ">>> Keeping pigen_work container (CONTINUE mode)"
+    else
+        echo ">>> Removing stale pigen_work container..."
+        docker rm -v pigen_work >/dev/null
+    fi
 fi
 
 # ── Build ────────────────────────────────────────────────────────────────────
