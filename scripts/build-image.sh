@@ -137,7 +137,12 @@ else
             -v sdr-pi-apt-cache:/var/cache/apt-cacher-ng \
             sameersbn/apt-cacher-ng >/dev/null
     fi
-    SDR_PI_APT_CACHE="http://host.docker.internal:3142"
+    # Determine the host IP reachable from Docker containers.
+    # host.docker.internal works on Docker Desktop but not inside privileged
+    # pi-gen containers.  Use the docker bridge gateway IP instead.
+    APT_CACHE_HOST=$(docker network inspect bridge -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null)
+    APT_CACHE_HOST="${APT_CACHE_HOST:-172.17.0.1}"
+    SDR_PI_APT_CACHE="http://${APT_CACHE_HOST}:3142"
     echo ">>> Using apt cache: ${SDR_PI_APT_CACHE}"
     echo "APT_PROXY=${SDR_PI_APT_CACHE}" >> "${PIGEN_DIR}/config"
 fi
