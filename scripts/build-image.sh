@@ -6,11 +6,13 @@
 #   - ~10 GB free disk space
 #
 # Environment variables:
-#   SDR_PI_CONF          Path to custom sdr-pi.conf (default: sdr-pi.conf.default)
-#   SDR_PI_SSH_PASSWORD   SSH password for sdr user (default: sdr)
-#   SDR_PI_APT_CACHE      apt-cacher-ng URL, or "none" to disable (default: auto)
-#   SDR_PI_CONTINUE       Set to 1 to resume a previous build (skip completed stages)
-#   SDR_PI_CLEAN          Set to 1 to wipe previous build state before starting
+#   SDR_PI_CONF            Path to custom sdr-pi.conf (default: sdr-pi.conf.default)
+#   SDR_PI_SSH_PASSWORD     SSH password for sdr user (default: sdr)
+#   SDR_PI_APT_CACHE        apt-cacher-ng URL, or "none" to disable (default: auto)
+#   SDR_PI_CONTINUE         Set to 1 to resume a previous build (skip completed stages)
+#   SDR_PI_CLEAN            Set to 1 to wipe previous build state before starting
+#   SDR_PI_RETRIES          Max automatic retries after failure (default: 2)
+#   SDR_PI_SKIP_PREFLIGHT   Set to 1 to skip preflight checks
 #
 # Build acceleration:
 #   - QEMU binfmt_misc registered automatically for ARM user-mode emulation
@@ -18,6 +20,12 @@
 #   - eatmydata disables fsync() inside the chroot (expensive under QEMU)
 #   - rtl_433, dump1090, and OP25 compile in parallel after librtlsdr
 #   - --no-install-recommends reduces package count
+#
+# Resilience:
+#   - Preflight checks verify DNS, mirrors, and disk space before building
+#   - apt-cacher-ng health check with fallback to direct mirrors
+#   - Automatic build retries with CONTINUE mode (skips completed stages)
+#   - Retry helpers inside chroot for apt, git, and compilation
 #
 # Usage: ./scripts/build-image.sh
 set -euo pipefail
@@ -42,6 +50,67 @@ if [[ "$PROJECT_DIR" == /mnt/[a-z]/* ]]; then
     echo "         Build I/O will be up to 20x slower than on the Linux FS." >&2
     echo "         Consider cloning to ~/src/sdr-pi instead." >&2
     echo ""
+fi
+
+# ── Preflight checks ─────────────────────────────────────────────────────────
+# Verify the build environment before spending time on setup.  Each check
+# gives a clear, actionable error message.
+preflight_checks() {
+    local PREFLIGHT_FAILED=0
+
+    # 1. Docker disk space — pi-gen needs ~8-10 GB of working space.
+    echo ">>> Preflight: checking Docker disk space..."
+    local DOCKER_ROOT FREE_KB
+    DOCKER_ROOT=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")
+    FREE_KB=$(df -k "$DOCKER_ROOT" 2>/dev/null | tail -1 | awk '{print $4}')
+    if [[ -n "$FREE_KB" ]] && (( FREE_KB < 8000000 )); then
+        local FREE_GB=$(( FREE_KB / 1024 / 1024 ))
+        echo "WARNING: Only ${FREE_GB} GB free on Docker storage (${DOCKER_ROOT})." >&2
+        echo "         pi-gen needs ~8-10 GB.  Free space with: docker system prune" >&2
+    fi
+
+    # 2. DNS resolution inside Docker.
+    #    This catches the common WSL2 issue where Docker containers can't
+    #    resolve hostnames.  Uses alpine (7 MB) for a fast check.
+    echo ">>> Preflight: checking DNS resolution in Docker..."
+    if ! docker run --rm --dns 8.8.8.8 alpine \
+        sh -c 'nslookup raspbian.raspberrypi.com >/dev/null 2>&1' 2>/dev/null; then
+        echo "ERROR: DNS resolution failed inside Docker containers." >&2
+        echo "       Cannot resolve raspbian.raspberrypi.com." >&2
+        echo "       Fixes to try:" >&2
+        echo "         1. Restart Docker Desktop" >&2
+        echo "         2. Add to Docker daemon config: \"dns\": [\"8.8.8.8\", \"8.8.4.4\"]" >&2
+        echo "         3. On WSL2: echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf" >&2
+        PREFLIGHT_FAILED=1
+    fi
+
+    # 3. Mirror reachability — warning only (may be transient, retries can help).
+    echo ">>> Preflight: checking mirror connectivity..."
+    for host in raspbian.raspberrypi.com archive.raspberrypi.com; do
+        if ! docker run --rm --dns 8.8.8.8 alpine \
+            sh -c "wget -q --spider --timeout=15 http://${host}/ 2>/dev/null" 2>/dev/null; then
+            echo "WARNING: Cannot reach ${host} — build may fail during apt-get update." >&2
+        fi
+    done
+
+    # 4. GitHub connectivity (needed for git clone inside chroot).
+    echo ">>> Preflight: checking github.com connectivity..."
+    if ! docker run --rm --dns 8.8.8.8 alpine \
+        sh -c 'nslookup github.com >/dev/null 2>&1' 2>/dev/null; then
+        echo "WARNING: Cannot resolve github.com — git clones may fail." >&2
+    fi
+
+    if [[ "$PREFLIGHT_FAILED" -ne 0 ]]; then
+        echo "" >&2
+        echo "Preflight checks failed. Fix the issues above and retry." >&2
+        echo "To skip checks: SDR_PI_SKIP_PREFLIGHT=1 ./scripts/build-image.sh" >&2
+        exit 1
+    fi
+    echo ">>> Preflight: all checks passed"
+}
+
+if [[ "${SDR_PI_SKIP_PREFLIGHT:-0}" != "1" ]]; then
+    preflight_checks
 fi
 
 # ── QEMU binfmt_misc setup ────────────────────────────────────────────────
@@ -94,6 +163,8 @@ if [[ "${SDR_PI_CLEAN:-0}" == "1" ]]; then
 fi
 
 # ── Write pi-gen config ─────────────────────────────────────────────────────
+# Note: APT_PROXY is appended later by the apt cache section if the proxy
+# passes health checks.  This avoids baking in a broken proxy URL.
 cat > "${PIGEN_DIR}/config" <<EOF
 IMG_NAME=sdr-pi
 RELEASE=bookworm
@@ -116,11 +187,42 @@ EOF
 # Override: set SDR_PI_APT_CACHE to point at an existing apt-cacher-ng
 # instance (e.g. http://192.168.1.10:3142).  Set SDR_PI_APT_CACHE=none
 # to disable caching entirely.
+
+# Test that apt-cacher-ng is actually proxying requests, not just running.
+# Returns 0 if healthy, 1 if unreachable.
+apt_cache_health_check() {
+    local proxy_url="$1"
+    local max_attempts=5
+    local attempt
+
+    for attempt in $(seq 1 "$max_attempts"); do
+        # Request a small file through the proxy to verify end-to-end connectivity.
+        if docker run --rm --dns 8.8.8.8 alpine \
+            sh -c "http_proxy='${proxy_url}' wget -q --timeout=10 \
+                   http://archive.raspberrypi.com/debian/dists/bookworm/Release.gpg \
+                   -O /dev/null 2>/dev/null" 2>/dev/null; then
+            return 0
+        fi
+        if [ "$attempt" -lt "$max_attempts" ]; then
+            echo "    apt cache not ready (attempt ${attempt}/${max_attempts}), waiting..." >&2
+            sleep $(( attempt * 2 ))
+        fi
+    done
+    return 1
+}
+
 if [[ "${SDR_PI_APT_CACHE:-}" == "none" ]]; then
     echo ">>> apt cache: disabled"
 elif [[ -n "${SDR_PI_APT_CACHE:-}" ]]; then
     echo ">>> Using apt cache: ${SDR_PI_APT_CACHE}"
-    echo "APT_PROXY=${SDR_PI_APT_CACHE}" >> "${PIGEN_DIR}/config"
+    echo ">>> Verifying apt cache is proxying correctly..."
+    if apt_cache_health_check "$SDR_PI_APT_CACHE"; then
+        echo ">>> apt cache: verified working"
+        echo "APT_PROXY=${SDR_PI_APT_CACHE}" >> "${PIGEN_DIR}/config"
+    else
+        echo "WARNING: apt cache at ${SDR_PI_APT_CACHE} is not responding." >&2
+        echo "         Falling back to direct mirror access (no caching)." >&2
+    fi
 else
     # Auto-start a local apt-cacher-ng container if one isn't running.
     APT_CACHE_NAME="sdr-pi-apt-cache"
@@ -143,8 +245,17 @@ else
     APT_CACHE_HOST=$(docker network inspect bridge -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null)
     APT_CACHE_HOST="${APT_CACHE_HOST:-172.17.0.1}"
     SDR_PI_APT_CACHE="http://${APT_CACHE_HOST}:3142"
-    echo ">>> Using apt cache: ${SDR_PI_APT_CACHE}"
-    echo "APT_PROXY=${SDR_PI_APT_CACHE}" >> "${PIGEN_DIR}/config"
+
+    # Health-check the apt cache before committing to using it.
+    echo ">>> Verifying apt cache at ${SDR_PI_APT_CACHE}..."
+    if apt_cache_health_check "$SDR_PI_APT_CACHE"; then
+        echo ">>> apt cache: verified working"
+        echo "APT_PROXY=${SDR_PI_APT_CACHE}" >> "${PIGEN_DIR}/config"
+    else
+        echo "WARNING: apt cache at ${SDR_PI_APT_CACHE} is not responding." >&2
+        echo "         Falling back to direct mirror access (no caching)." >&2
+        echo "         Rebuild may be slower. Check Docker networking." >&2
+    fi
 fi
 
 # ── Copy our custom stage into pi-gen ─────────────────────────────────────────
@@ -232,7 +343,7 @@ fi
 # (possibly failed) build still exists.  When continuing, keep the container
 # (pi-gen reuses its volumes to skip completed work).  Otherwise remove it.
 if docker ps -a --filter name=pigen_work -q | grep -q .; then
-    if [[ "${SDR_PI_CONTINUE:-0}" == "1" ]]; then
+    if [[ "${SDR_PI_CONTINUE:-0}" == "1" ]] || [[ "${CONTINUE:-0}" == "1" ]]; then
         echo ">>> Keeping pigen_work container (CONTINUE mode)"
     else
         echo ">>> Removing stale pigen_work container..."
@@ -240,10 +351,77 @@ if docker ps -a --filter name=pigen_work -q | grep -q .; then
     fi
 fi
 
-# ── Build ────────────────────────────────────────────────────────────────────
-echo ">>> Starting pi-gen Docker build..."
-cd "$PIGEN_DIR"
-./build-docker.sh
+# ── Build with retry loop ────────────────────────────────────────────────────
+# Automatically retry failed builds using CONTINUE mode (skips completed
+# stages).  pi-gen's CONTINUE creates an ephemeral "pigen_work_cont" container
+# that mounts volumes from the original "pigen_work" container, preserving
+# work from previous attempts.
+SDR_PI_RETRIES="${SDR_PI_RETRIES:-2}"
+BUILD_ATTEMPT=0
+BUILD_SUCCESS=0
+
+while [[ $BUILD_ATTEMPT -le $SDR_PI_RETRIES ]]; do
+    BUILD_ATTEMPT=$((BUILD_ATTEMPT + 1))
+
+    if [[ $BUILD_ATTEMPT -gt 1 ]]; then
+        echo ""
+        echo ">>> Build attempt ${BUILD_ATTEMPT}/$((SDR_PI_RETRIES + 1)) (retrying with CONTINUE mode)..."
+        echo "    Previous attempt failed at $(date)"
+        echo ""
+
+        # On retry, enable CONTINUE mode to reuse volumes from the failed
+        # pigen_work container (skips completed stages).
+        export CONTINUE=1
+
+        # Remove the ephemeral continuation container if it lingered.
+        # Do NOT remove pigen_work — it holds the build volumes.
+        if docker ps -a --filter name=pigen_work_cont -q 2>/dev/null | grep -q .; then
+            docker rm -v pigen_work_cont >/dev/null 2>&1 || true
+        fi
+
+        # Re-check apt cache health before retrying.  If the proxy is still
+        # broken, strip APT_PROXY so this attempt uses direct mirrors.
+        if grep -q '^APT_PROXY=' "${PIGEN_DIR}/config" 2>/dev/null; then
+            APT_PROXY_URL=$(grep '^APT_PROXY=' "${PIGEN_DIR}/config" | cut -d= -f2)
+            echo ">>> Re-checking apt cache before retry..."
+            if ! apt_cache_health_check "$APT_PROXY_URL"; then
+                echo "WARNING: apt cache still unavailable, removing proxy config..." >&2
+                sed -i '/^APT_PROXY=/d' "${PIGEN_DIR}/config"
+            fi
+        fi
+
+        # Re-copy our custom stage (may have been modified by pi-gen).
+        rm -rf "${PIGEN_DIR}/stage-sdr-pi"
+        cp -r "${PROJECT_DIR}/pi-gen-stage" "${PIGEN_DIR}/stage-sdr-pi"
+
+        # Brief pause to let transient issues clear.
+        RETRY_DELAY=$(( 15 * BUILD_ATTEMPT ))
+        echo ">>> Waiting ${RETRY_DELAY}s before retry..."
+        sleep "$RETRY_DELAY"
+    fi
+
+    echo ">>> Starting pi-gen Docker build (attempt ${BUILD_ATTEMPT}/$((SDR_PI_RETRIES + 1)))..."
+    cd "$PIGEN_DIR"
+    if ./build-docker.sh; then
+        BUILD_SUCCESS=1
+        break
+    else
+        echo "" >&2
+        echo ">>> Build attempt ${BUILD_ATTEMPT} failed." >&2
+        REMAINING=$((SDR_PI_RETRIES - BUILD_ATTEMPT + 1))
+        if [[ $REMAINING -gt 0 ]]; then
+            echo ">>> Will retry automatically (${REMAINING} retries remaining)." >&2
+        fi
+    fi
+done
+
+if [[ $BUILD_SUCCESS -ne 1 ]]; then
+    echo "" >&2
+    echo "ERROR: Build failed after $((SDR_PI_RETRIES + 1)) attempts." >&2
+    echo "       Check the build log for details." >&2
+    echo "       You can retry manually with: SDR_PI_CONTINUE=1 ./scripts/build-image.sh" >&2
+    exit 1
+fi
 
 # ── Copy output image ───────────────────────────────────────────────────────
 mkdir -p "${PROJECT_DIR}/deploy"

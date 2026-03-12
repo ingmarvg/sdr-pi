@@ -96,10 +96,35 @@ and OP25 compile concurrently.
 SDR_PI_CLEAN=1 ./scripts/build-image.sh
 ```
 
+### Build resilience
+
+The build script includes automatic retries and preflight checks to handle
+transient failures (mirror outages, DNS issues, Docker networking problems).
+
+**Preflight checks** — before building, the script verifies DNS resolution
+inside Docker, mirror connectivity, and disk space. To skip:
+
+```bash
+SDR_PI_SKIP_PREFLIGHT=1 ./scripts/build-image.sh
+```
+
+**Automatic retries** — if the build fails, it automatically retries up to
+2 times using CONTINUE mode (skipping completed stages). Control the retry
+count:
+
+```bash
+SDR_PI_RETRIES=3 ./scripts/build-image.sh     # up to 4 total attempts
+SDR_PI_RETRIES=0 ./scripts/build-image.sh     # no retries (fail immediately)
+```
+
+**Apt cache fallback** — if apt-cacher-ng is unresponsive (e.g. returning
+503 errors), the build automatically falls back to direct mirror access
+instead of failing. The cache is health-checked before each build attempt.
+
 All options can be combined:
 
 ```bash
-SDR_PI_CONTINUE=1 SDR_PI_APT_CACHE=http://host.docker.internal:3142 ./scripts/build-image.sh
+SDR_PI_CONTINUE=1 SDR_PI_APT_CACHE=http://192.168.1.10:3142 ./scripts/build-image.sh
 ```
 
 ### WSL2 performance tips
