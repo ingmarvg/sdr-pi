@@ -248,6 +248,16 @@ else
             -v sdr-pi-apt-cache:/var/cache/apt-cacher-ng \
             sameersbn/apt-cacher-ng >/dev/null
     fi
+    # Disable apt-cacher-ng's Remap rules so it acts as a pure HTTP cache.
+    # The default Remap-debrep rule catches all /debian URLs and redirects
+    # them through its Debian backends, which breaks Raspberry Pi mirrors
+    # (archive.raspberrypi.com/debian/ has different packages).
+    if docker exec "${APT_CACHE_NAME}" sh -c 'grep -q "^Remap-debrep:" /etc/apt-cacher-ng/acng.conf' 2>/dev/null; then
+        echo ">>> Configuring apt cache (disabling Remap rules for RPi compatibility)..."
+        docker exec "${APT_CACHE_NAME}" sh -c "sed -i 's/^Remap-/#Remap-/' /etc/apt-cacher-ng/acng.conf"
+        docker restart "${APT_CACHE_NAME}" >/dev/null
+        sleep 2
+    fi
     # Determine the host IP reachable from Docker containers.
     # host.docker.internal works on Docker Desktop but not inside privileged
     # pi-gen containers.  Use the docker bridge gateway IP instead.
