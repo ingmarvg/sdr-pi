@@ -149,10 +149,12 @@ build_dump1090() {
 }
 
 build_op25() {
+    local OP25_COMMIT="5dfc043"
+    local OP25_URL="https://github.com/boatbod/op25/archive/${OP25_COMMIT}.tar.gz"
     cd /tmp \
-    && git_clone_retry --depth 1 https://github.com/boatbod/op25.git op25 \
-    && cd op25 && git fetch --depth 1 origin 5dfc043 && git checkout FETCH_HEAD \
-    && cd op25/gr-op25_repeater && mkdir build && cd build \
+    && retry 3 "OP25 download" wget -q --timeout=30 -O op25.tar.gz "$OP25_URL" \
+    && mkdir op25 && tar xzf op25.tar.gz -C op25 --strip-components=1 && rm op25.tar.gz \
+    && cd op25/op25/gr-op25_repeater && mkdir build && cd build \
     && cmake .. -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS" \
     && make -j"$(( $(nproc) / 3 + 1 ))" && make install && ldconfig \
     && cp -r /tmp/op25/op25/gr-op25_repeater/apps /opt/op25 \

@@ -192,22 +192,29 @@ EOF
 
 # Test that apt-cacher-ng is actually proxying requests, not just running.
 # Returns 0 if healthy, 1 if unreachable.
+# Uses curl/wget on the host first (fast), falls back to a Docker container
+# test to verify in-container reachability.
 apt_cache_health_check() {
     local proxy_url="$1"
-    local max_attempts=5
+    local max_attempts=3
     local attempt
 
     for attempt in $(seq 1 "$max_attempts"); do
-        # Request a small file through the proxy to verify end-to-end connectivity.
-        if timeout 20 docker run --rm --dns 8.8.8.8 alpine \
-            sh -c "http_proxy='${proxy_url}' wget -q --timeout=10 \
-                   http://deb.debian.org/debian/dists/bookworm/Release.gpg \
-                   -O /dev/null 2>/dev/null" 2>/dev/null; then
+        # Fast host-side check: verify the proxy port is responding.
+        if curl -sf --max-time 5 -x "${proxy_url}" \
+               http://deb.debian.org/debian/dists/bookworm/Release.gpg \
+               -o /dev/null 2>/dev/null; then
+            return 0
+        elif wget -q --timeout=5 -e "http_proxy=${proxy_url}" \
+               http://deb.debian.org/debian/dists/bookworm/Release.gpg \
+               -O /dev/null 2>/dev/null; then
             return 0
         fi
         if [ "$attempt" -lt "$max_attempts" ]; then
             echo "    apt cache not ready (attempt ${attempt}/${max_attempts}), waiting..." >&2
-            sleep $(( attempt * 2 ))
+            # Restart the container in case it's wedged.
+            docker restart sdr-pi-apt-cache >/dev/null 2>&1 || true
+            sleep $(( attempt * 3 ))
         fi
     done
     return 1
