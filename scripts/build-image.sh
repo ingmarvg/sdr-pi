@@ -8,7 +8,7 @@
 # Environment variables:
 #   SDR_PI_CONF            Path to custom sdr-pi.conf (default: sdr-pi.conf.default)
 #   SDR_PI_SSH_PASSWORD     SSH password for sdr user (default: sdr)
-#   SDR_PI_APT_CACHE        apt-cacher-ng URL, or "none" to disable (default: auto)
+#   SDR_PI_APT_CACHE        apt-cacher-ng URL, or "none" to disable (default: none)
 #   SDR_PI_CONTINUE         Set to 1 to resume a previous build (skip completed stages)
 #   SDR_PI_CLEAN            Set to 1 to wipe previous build state before starting
 #   SDR_PI_RETRIES          Max automatic retries after failure (default: 2)
@@ -220,7 +220,7 @@ apt_cache_health_check() {
     return 1
 }
 
-if [[ "${SDR_PI_APT_CACHE:-}" == "none" ]]; then
+if [[ "${SDR_PI_APT_CACHE:-none}" == "none" ]]; then
     echo ">>> apt cache: disabled"
 elif [[ -n "${SDR_PI_APT_CACHE:-}" ]]; then
     echo ">>> Using apt cache: ${SDR_PI_APT_CACHE}"
