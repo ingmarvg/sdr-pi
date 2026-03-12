@@ -256,8 +256,10 @@ else
     SDR_PI_APT_CACHE="http://${APT_CACHE_HOST}:3142"
 
     # Health-check the apt cache before committing to using it.
+    # Test via localhost (reachable from host via Docker port mapping) even
+    # though APT_PROXY uses the bridge IP (reachable from inside containers).
     echo ">>> Verifying apt cache at ${SDR_PI_APT_CACHE}..."
-    if apt_cache_health_check "$SDR_PI_APT_CACHE"; then
+    if apt_cache_health_check "http://localhost:3142"; then
         echo ">>> apt cache: verified working"
         echo "APT_PROXY=${SDR_PI_APT_CACHE}" >> "${PIGEN_DIR}/config"
     else
@@ -398,9 +400,8 @@ while [[ $BUILD_ATTEMPT -le $SDR_PI_RETRIES ]]; do
         # Re-check apt cache health before retrying.  If the proxy is still
         # broken, strip APT_PROXY so this attempt uses direct mirrors.
         if grep -q '^APT_PROXY=' "${PIGEN_DIR}/config" 2>/dev/null; then
-            APT_PROXY_URL=$(grep '^APT_PROXY=' "${PIGEN_DIR}/config" | cut -d= -f2)
             echo ">>> Re-checking apt cache before retry..."
-            if ! apt_cache_health_check "$APT_PROXY_URL"; then
+            if ! apt_cache_health_check "http://localhost:3142"; then
                 echo "WARNING: apt cache still unavailable, removing proxy config..." >&2
                 sed -i '/^APT_PROXY=/d' "${PIGEN_DIR}/config"
             fi
