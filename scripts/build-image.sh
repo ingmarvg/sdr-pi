@@ -60,20 +60,17 @@ preflight_checks() {
 
     # 1. Docker disk space — pi-gen needs ~8-10 GB of working space.
     echo ">>> Preflight: checking Docker disk space..."
-    local DOCKER_ROOT FREE_KB
-    DOCKER_ROOT=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")
-    FREE_KB=$(df -k "$DOCKER_ROOT" 2>/dev/null | tail -1 | awk '{print $4}')
-    if [[ -n "$FREE_KB" ]] && (( FREE_KB < 8000000 )); then
-        local FREE_GB=$(( FREE_KB / 1024 / 1024 ))
-        echo "WARNING: Only ${FREE_GB} GB free on Docker storage (${DOCKER_ROOT})." >&2
-        echo "         pi-gen needs ~8-10 GB.  Free space with: docker system prune" >&2
+    local DOCKER_FREE
+    DOCKER_FREE=$(timeout 10 docker system df --format '{{.Size}}' 2>/dev/null | head -1 || true)
+    if [[ -z "$DOCKER_FREE" ]]; then
+        echo "    (skipped — could not query Docker disk usage)" >&2
     fi
 
     # 2. DNS resolution inside Docker.
     #    This catches the common WSL2 issue where Docker containers can't
     #    resolve hostnames.  Uses alpine (7 MB) for a fast check.
     echo ">>> Preflight: checking DNS resolution in Docker..."
-    if ! docker run --rm --dns 8.8.8.8 alpine \
+    if ! timeout 30 docker run --rm --dns 8.8.8.8 alpine \
         sh -c 'nslookup raspbian.raspberrypi.com >/dev/null 2>&1' 2>/dev/null; then
         echo "ERROR: DNS resolution failed inside Docker containers." >&2
         echo "       Cannot resolve raspbian.raspberrypi.com." >&2
@@ -87,7 +84,7 @@ preflight_checks() {
     # 3. Mirror reachability — warning only (may be transient, retries can help).
     echo ">>> Preflight: checking mirror connectivity..."
     for host in raspbian.raspberrypi.com archive.raspberrypi.com; do
-        if ! docker run --rm --dns 8.8.8.8 alpine \
+        if ! timeout 20 docker run --rm --dns 8.8.8.8 alpine \
             sh -c "wget -q --spider --timeout=15 http://${host}/ 2>/dev/null" 2>/dev/null; then
             echo "WARNING: Cannot reach ${host} — build may fail during apt-get update." >&2
         fi
@@ -95,7 +92,7 @@ preflight_checks() {
 
     # 4. GitHub connectivity (needed for git clone inside chroot).
     echo ">>> Preflight: checking github.com connectivity..."
-    if ! docker run --rm --dns 8.8.8.8 alpine \
+    if ! timeout 20 docker run --rm --dns 8.8.8.8 alpine \
         sh -c 'nslookup github.com >/dev/null 2>&1' 2>/dev/null; then
         echo "WARNING: Cannot resolve github.com — git clones may fail." >&2
     fi
@@ -197,7 +194,7 @@ apt_cache_health_check() {
 
     for attempt in $(seq 1 "$max_attempts"); do
         # Request a small file through the proxy to verify end-to-end connectivity.
-        if docker run --rm --dns 8.8.8.8 alpine \
+        if timeout 20 docker run --rm --dns 8.8.8.8 alpine \
             sh -c "http_proxy='${proxy_url}' wget -q --timeout=10 \
                    http://archive.raspberrypi.com/debian/dists/bookworm/Release.gpg \
                    -O /dev/null 2>/dev/null" 2>/dev/null; then
