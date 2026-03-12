@@ -262,28 +262,33 @@ fi
 
 # ── Copy our custom stage into pi-gen ─────────────────────────────────────────
 # Must be a real copy (not symlink) because Docker COPY won't follow symlinks
-# that point outside the build context.
-rm -rf "${PIGEN_DIR}/stage-sdr-pi"
-cp -r "${PROJECT_DIR}/pi-gen-stage" "${PIGEN_DIR}/stage-sdr-pi"
+# that point outside the build context.  Also populates the files/ directory
+# with config files, scripts, and service units that are .gitignored in the
+# source tree (generated at build time).
+prepare_stage() {
+    rm -rf "${PIGEN_DIR}/stage-sdr-pi"
+    cp -r "${PROJECT_DIR}/pi-gen-stage" "${PIGEN_DIR}/stage-sdr-pi"
 
-# ── Populate the pi-gen files/ directory for the configure stage ─────────────
-STAGE_FILES="${PIGEN_DIR}/stage-sdr-pi/01-configure-services/files"
-mkdir -p "$STAGE_FILES"
-# Use custom config if SDR_PI_CONF is set, otherwise use default.
-cp "${SDR_PI_CONF:-${PROJECT_DIR}/sdr-pi.conf.default}" "${STAGE_FILES}/sdr-pi.conf"
-cp "${PROJECT_DIR}/config/udev/99-rtlsdr.rules"       "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/config/systemd/"*.service           "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/scripts/sdr-pi-rtl433-wrapper"      "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/scripts/sdr-pi-dump1090-wrapper"    "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/scripts/sdr-pi-op25-wrapper"        "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/scripts/sdr-pi-apply-config"        "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/scripts/sdr-pi-status"              "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/config/sysctl.d/99-sdr-pi.conf"    "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/config/modprobe.d/99-sdr-pi-usb.conf" "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/config/boot/config.txt.sdr-pi"     "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/config/boot/cmdline.txt.sdr-pi"    "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/config/journald/journald.conf.override" "${STAGE_FILES}/"
-cp "${PROJECT_DIR}/config/fstab/sdr-pi.fstab"         "${STAGE_FILES}/"
+    local STAGE_FILES="${PIGEN_DIR}/stage-sdr-pi/01-configure-services/files"
+    mkdir -p "$STAGE_FILES"
+    # Use custom config if SDR_PI_CONF is set, otherwise use default.
+    cp "${SDR_PI_CONF:-${PROJECT_DIR}/sdr-pi.conf.default}" "${STAGE_FILES}/sdr-pi.conf"
+    cp "${PROJECT_DIR}/config/udev/99-rtlsdr.rules"       "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/config/systemd/"*.service           "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/scripts/sdr-pi-rtl433-wrapper"      "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/scripts/sdr-pi-dump1090-wrapper"    "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/scripts/sdr-pi-op25-wrapper"        "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/scripts/sdr-pi-apply-config"        "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/scripts/sdr-pi-status"              "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/config/sysctl.d/99-sdr-pi.conf"    "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/config/modprobe.d/99-sdr-pi-usb.conf" "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/config/boot/config.txt.sdr-pi"     "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/config/boot/cmdline.txt.sdr-pi"    "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/config/journald/journald.conf.override" "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/config/fstab/sdr-pi.fstab"         "${STAGE_FILES}/"
+    echo ">>> Stage prepared ($(ls "$STAGE_FILES" | wc -l) files)"
+}
+prepare_stage
 
 # Skip stages 3-5 (desktop and full environment — not needed for headless).
 touch "${PIGEN_DIR}/stage3/SKIP" "${PIGEN_DIR}/stage4/SKIP" "${PIGEN_DIR}/stage5/SKIP"
@@ -392,9 +397,8 @@ while [[ $BUILD_ATTEMPT -le $SDR_PI_RETRIES ]]; do
             fi
         fi
 
-        # Re-copy our custom stage (may have been modified by pi-gen).
-        rm -rf "${PIGEN_DIR}/stage-sdr-pi"
-        cp -r "${PROJECT_DIR}/pi-gen-stage" "${PIGEN_DIR}/stage-sdr-pi"
+        # Re-prepare our custom stage (may have been modified by pi-gen).
+        prepare_stage
 
         # Brief pause to let transient issues clear.
         RETRY_DELAY=$(( 15 * BUILD_ATTEMPT ))

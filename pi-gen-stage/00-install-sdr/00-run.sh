@@ -129,35 +129,35 @@ MOD
 # librtlsdr is installed; the remaining three are independent of each other.
 
 build_rtl433() {
-    cd /tmp
-    git_clone_retry --branch 24.10 --depth 1 https://github.com/merbanan/rtl_433.git rtl_433
-    cd rtl_433 && mkdir build && cd build
-    cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local \
-        -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS"
-    make -j"$(( $(nproc) / 3 + 1 ))" && make install
-    cd /tmp && rm -rf rtl_433
+    cd /tmp \
+    && git_clone_retry --branch 24.10 --depth 1 https://github.com/merbanan/rtl_433.git rtl_433 \
+    && cd rtl_433 && mkdir build && cd build \
+    && cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS" \
+    && make -j"$(( $(nproc) / 3 + 1 ))" && make install \
+    && cd /tmp && rm -rf rtl_433
 }
 
 build_dump1090() {
-    cd /tmp
-    git_clone_retry --branch v1.14 --depth 1 https://github.com/mutability/dump1090.git dump1090-src
-    cd dump1090-src
-    make -j"$(( $(nproc) / 3 + 1 ))" CFLAGS="$SDR_PI_CFLAGS"
-    cp dump1090 /usr/local/bin/dump1090-mutability
-    chmod 755 /usr/local/bin/dump1090-mutability
-    cd /tmp && rm -rf dump1090-src
+    cd /tmp \
+    && git_clone_retry --branch v1.14 --depth 1 https://github.com/mutability/dump1090.git dump1090-src \
+    && cd dump1090-src \
+    && make -j"$(( $(nproc) / 3 + 1 ))" CFLAGS="$SDR_PI_CFLAGS" \
+    && cp dump1090 /usr/local/bin/dump1090-mutability \
+    && chmod 755 /usr/local/bin/dump1090-mutability \
+    && cd /tmp && rm -rf dump1090-src
 }
 
 build_op25() {
-    cd /tmp
-    git_clone_retry https://github.com/boatbod/op25.git op25
-    cd op25 && git checkout 5dfc043
-    cd op25/gr-op25_repeater && mkdir build && cd build
-    cmake .. -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS"
-    make -j"$(( $(nproc) / 3 + 1 ))" && make install && ldconfig
-    cp -r /tmp/op25/op25/gr-op25_repeater/apps /opt/op25
-    ln -sf /opt/op25/rx.py /usr/local/bin/rx.py
-    cd /tmp && rm -rf op25
+    cd /tmp \
+    && git_clone_retry https://github.com/boatbod/op25.git op25 \
+    && cd op25 && git checkout 5dfc043 \
+    && cd op25/gr-op25_repeater && mkdir build && cd build \
+    && cmake .. -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS" \
+    && make -j"$(( $(nproc) / 3 + 1 ))" && make install && ldconfig \
+    && cp -r /tmp/op25/op25/gr-op25_repeater/apps /opt/op25 \
+    && ln -sf /opt/op25/rx.py /usr/local/bin/rx.py \
+    && cd /tmp && rm -rf op25
 }
 
 # Export so subshells can use them.
