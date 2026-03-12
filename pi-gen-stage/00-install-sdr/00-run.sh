@@ -150,8 +150,8 @@ build_dump1090() {
 
 build_op25() {
     cd /tmp \
-    && git_clone_retry https://github.com/boatbod/op25.git op25 \
-    && cd op25 && git checkout 5dfc043 \
+    && git_clone_retry --depth 1 https://github.com/boatbod/op25.git op25 \
+    && cd op25 && git fetch --depth 1 origin 5dfc043 && git checkout FETCH_HEAD \
     && cd op25/gr-op25_repeater && mkdir build && cd build \
     && cmake .. -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS" \
     && make -j"$(( $(nproc) / 3 + 1 ))" && make install && ldconfig \

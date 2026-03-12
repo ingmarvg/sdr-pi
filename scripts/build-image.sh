@@ -201,7 +201,7 @@ apt_cache_health_check() {
         # Request a small file through the proxy to verify end-to-end connectivity.
         if timeout 20 docker run --rm --dns 8.8.8.8 alpine \
             sh -c "http_proxy='${proxy_url}' wget -q --timeout=10 \
-                   http://archive.raspberrypi.com/debian/dists/bookworm/Release.gpg \
+                   http://deb.debian.org/debian/dists/bookworm/Release.gpg \
                    -O /dev/null 2>/dev/null" 2>/dev/null; then
             return 0
         fi
