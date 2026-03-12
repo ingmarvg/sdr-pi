@@ -1,0 +1,55 @@
+name: Build SDR-Pi Image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      upload_artifact:
+        description: 'Upload image as artifact (for testing without a release)'
+        required: false
+        default: 'true'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h /
+
+      - name: Build image
+        run: |
+          bash scripts/build-image.sh
+        env:
+          SDR_PI_SKIP_PREFLIGHT: '1'
+          SDR_PI_APT_CACHE: 'none'
+          SDR_PI_RETRIES: '2'
+
+      - name: Compress image
+        run: |
+          IMG=$(ls deploy/sdr-pi-*.img)
+          xz -9 -T0 "$IMG"
+          ls -lh deploy/
+
+      - name: Upload artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdr-pi-image
+          path: deploy/sdr-pi-*.img.xz
+          retention-days: 7
+
+      - name: Upload to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            deploy/sdr-pi-*.img.xz
