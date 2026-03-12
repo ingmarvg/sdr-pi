@@ -142,7 +142,7 @@ build_dump1090() {
     cd /tmp \
     && git_clone_retry --branch v1.14 --depth 1 https://github.com/mutability/dump1090.git dump1090-src \
     && cd dump1090-src \
-    && make -j"$(( $(nproc) / 3 + 1 ))" CFLAGS="$SDR_PI_CFLAGS" \
+    && make -j"$(( $(nproc) / 3 + 1 ))" CFLAGS="$SDR_PI_CFLAGS -fcommon" \
     && cp dump1090 /usr/local/bin/dump1090-mutability \
     && chmod 755 /usr/local/bin/dump1090-mutability \
     && cd /tmp && rm -rf dump1090-src
