@@ -255,6 +255,8 @@ else
     if docker exec "${APT_CACHE_NAME}" sh -c 'grep -q "^Remap-debrep:" /etc/apt-cacher-ng/acng.conf' 2>/dev/null; then
         echo ">>> Configuring apt cache (disabling Remap rules for RPi compatibility)..."
         docker exec "${APT_CACHE_NAME}" sh -c "sed -i 's/^Remap-/#Remap-/' /etc/apt-cacher-ng/acng.conf"
+        # Clear stale cache entries (old Remap rules may have cached 503 errors).
+        docker exec "${APT_CACHE_NAME}" sh -c 'rm -rf /var/cache/apt-cacher-ng/_*' 2>/dev/null || true
         docker restart "${APT_CACHE_NAME}" >/dev/null
         sleep 2
     fi
