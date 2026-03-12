@@ -67,17 +67,16 @@ the sdr-pi stage (~10 min instead of ~60 min):
 SDR_PI_CONTINUE=1 ./scripts/build-image.sh
 ```
 
-**apt-cacher-ng** — avoid re-downloading ~500 MB of packages on every
-build by running a local apt cache:
+**apt-cacher-ng** — a local apt cache container is started automatically
+on the first build and persists across rebuilds. Downloaded packages
+(~500 MB) are cached locally so retries and rebuilds don't hit remote
+mirrors. To point at an existing cache instead:
 
 ```bash
-# Start a cache container (one-time)
-docker run -d -p 3142:3142 --name apt-cache \
-    -v apt-cache:/var/cache/apt-cacher-ng sameersbn/apt-cacher-ng
-
-# Point the build at it
-SDR_PI_APT_CACHE=http://host.docker.internal:3142 ./scripts/build-image.sh
+SDR_PI_APT_CACHE=http://192.168.1.10:3142 ./scripts/build-image.sh
 ```
+
+To disable caching: `SDR_PI_APT_CACHE=none`.
 
 **ccache** — compiled object files are cached in `build/ccache/` and
 automatically mounted into the Docker container. On rebuilds where the

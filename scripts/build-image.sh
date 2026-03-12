@@ -8,7 +8,7 @@
 # Environment variables:
 #   SDR_PI_CONF          Path to custom sdr-pi.conf (default: sdr-pi.conf.default)
 #   SDR_PI_SSH_PASSWORD   SSH password for sdr user (default: sdr)
-#   SDR_PI_APT_CACHE      apt-cacher-ng URL (e.g. http://192.168.1.10:3142)
+#   SDR_PI_APT_CACHE      apt-cacher-ng URL, or "none" to disable (default: auto)
 #   SDR_PI_CONTINUE       Set to 1 to resume a previous build (skip completed stages)
 #   SDR_PI_CLEAN          Set to 1 to wipe previous build state before starting
 #
@@ -109,14 +109,35 @@ STAGE_LIST="stage0 stage1 stage2 stage-sdr-pi"
 EOF
 
 # ── apt-cacher-ng ────────────────────────────────────────────────────────────
-# Point pi-gen at a local apt cache to avoid re-downloading ~500 MB of packages
-# on every rebuild.  Set SDR_PI_APT_CACHE to your apt-cacher-ng URL, e.g.:
-#   export SDR_PI_APT_CACHE=http://192.168.1.10:3142
+# Cache downloaded .deb packages locally so rebuilds and retries don't
+# re-download ~500 MB from remote mirrors.  The cache container is started
+# automatically and persists across builds.
 #
-# To run apt-cacher-ng locally:
-#   docker run -d -p 3142:3142 --name apt-cache -v apt-cache:/var/cache/apt-cacher-ng sameersbn/apt-cacher-ng
-#   export SDR_PI_APT_CACHE=http://host.docker.internal:3142
-if [[ -n "${SDR_PI_APT_CACHE:-}" ]]; then
+# Override: set SDR_PI_APT_CACHE to point at an existing apt-cacher-ng
+# instance (e.g. http://192.168.1.10:3142).  Set SDR_PI_APT_CACHE=none
+# to disable caching entirely.
+if [[ "${SDR_PI_APT_CACHE:-}" == "none" ]]; then
+    echo ">>> apt cache: disabled"
+elif [[ -n "${SDR_PI_APT_CACHE:-}" ]]; then
+    echo ">>> Using apt cache: ${SDR_PI_APT_CACHE}"
+    echo "APT_PROXY=${SDR_PI_APT_CACHE}" >> "${PIGEN_DIR}/config"
+else
+    # Auto-start a local apt-cacher-ng container if one isn't running.
+    APT_CACHE_NAME="sdr-pi-apt-cache"
+    if docker ps --filter name="${APT_CACHE_NAME}" --filter status=running -q | grep -q .; then
+        echo ">>> apt cache: running (${APT_CACHE_NAME})"
+    elif docker ps -a --filter name="${APT_CACHE_NAME}" -q | grep -q .; then
+        echo ">>> Starting existing apt cache container..."
+        docker start "${APT_CACHE_NAME}" >/dev/null
+    else
+        echo ">>> Starting apt cache (first time — will persist across builds)..."
+        docker run -d -p 3142:3142 \
+            --name "${APT_CACHE_NAME}" \
+            --restart unless-stopped \
+            -v sdr-pi-apt-cache:/var/cache/apt-cacher-ng \
+            sameersbn/apt-cacher-ng >/dev/null
+    fi
+    SDR_PI_APT_CACHE="http://host.docker.internal:3142"
     echo ">>> Using apt cache: ${SDR_PI_APT_CACHE}"
     echo "APT_PROXY=${SDR_PI_APT_CACHE}" >> "${PIGEN_DIR}/config"
 fi
