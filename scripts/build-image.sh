@@ -135,7 +135,7 @@ if [[ ! -d "$PIGEN_DIR" ]]; then
 fi
 
 # ── Patch pi-gen build-docker.sh ─────────────────────────────────────────────
-# Fixes for WSL2 / Docker Desktop:
+# Fixes for WSL2 / Docker Desktop and native ARM builds:
 #   1. DNS: use --network=host for `docker build` so it inherits the host's
 #      /etc/resolv.conf.  BuildKit doesn't support --dns, but does --network.
 #   2. binfmt: pi-gen checks for `qemu-arm` on the host, but on WSL2 + Docker
@@ -143,14 +143,19 @@ fi
 #      tonistiigi/binfmt) and aren't visible at /proc/sys/fs/binfmt_misc.
 #      The container already runs `dpkg-reconfigure qemu-user-binfmt` so the
 #      host-side check is unnecessary.
+#   3. Base image: pi-gen uses i386/debian on aarch64, but that image has no
+#      ARM manifest.  On native ARM, use debian:bookworm instead.
 PIGEN_BUILD_DOCKER="${PIGEN_DIR}/build-docker.sh"
 if ! grep -q 'sdr-pi-patched' "$PIGEN_BUILD_DOCKER" 2>/dev/null; then
-    echo ">>> Patching pi-gen build-docker.sh (DNS + binfmt)..."
+    echo ">>> Patching pi-gen build-docker.sh (DNS + binfmt + ARM base image)..."
     # 1. Add --network=host to docker build (BuildKit doesn't support --dns)
     # shellcheck disable=SC2016
     sed -i 's|${DOCKER} build --build-arg|${DOCKER} build --network=host --build-arg|' "$PIGEN_BUILD_DOCKER"
     # 2. Skip host-side binfmt check — handled by tonistiigi/binfmt + container
     sed -i 's|binfmt_misc_required=1|binfmt_misc_required=0  # sdr-pi-patched|' "$PIGEN_BUILD_DOCKER"
+    # 3. Fix base image for native ARM: i386/debian has no arm64 manifest.
+    #    On aarch64, use debian:bookworm (native ARM) instead of i386/debian.
+    sed -i 's|x86_64\|aarch64)|x86_64)  # sdr-pi-patched|' "$PIGEN_BUILD_DOCKER"
 fi
 
 # ── Clean previous build if requested ────────────────────────────────────────
@@ -317,8 +322,8 @@ echo ">>> ccache volume: ${CCACHE_DIR} → /ccache"
 # image here lets us detect Docker networking / DNS problems early and give a
 # clear error message instead of a cryptic Dockerfile build failure.
 case "$(uname -m)" in
-    x86_64|aarch64) BASE_IMAGE="i386/debian:bookworm" ;;
-    *)              BASE_IMAGE="debian:bookworm" ;;
+    x86_64) BASE_IMAGE="i386/debian:bookworm" ;;
+    *)      BASE_IMAGE="debian:bookworm" ;;
 esac
 if ! docker image inspect "$BASE_IMAGE" &>/dev/null; then
     echo ">>> Pulling base image ${BASE_IMAGE}..."
