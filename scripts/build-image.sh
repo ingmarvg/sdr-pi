@@ -319,8 +319,10 @@ fi
 # pi-gen's build-docker.sh passes PIGEN_DOCKER_OPTS to `docker run`.
 CCACHE_DIR="${PROJECT_DIR}/build/ccache"
 mkdir -p "$CCACHE_DIR"
-export PIGEN_DOCKER_OPTS="${PIGEN_DOCKER_OPTS:-} -v ${CCACHE_DIR}:/ccache --dns 8.8.8.8"
+STAGE_DIR="${PIGEN_DIR}/stage-sdr-pi"
+export PIGEN_DOCKER_OPTS="${PIGEN_DOCKER_OPTS:-} -v ${CCACHE_DIR}:/ccache --dns 8.8.8.8 -v ${STAGE_DIR}:/pi-gen/stage-sdr-pi"
 echo ">>> ccache volume: ${CCACHE_DIR} → /ccache"
+echo ">>> stage volume:  ${STAGE_DIR} → /pi-gen/stage-sdr-pi"
 
 # ── Pre-pull pi-gen base image ──────────────────────────────────────────────
 # pi-gen's build-docker.sh uses i386/debian on 64-bit hosts.  Pre-pulling the
