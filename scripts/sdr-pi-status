@@ -10,7 +10,7 @@ if [[ -f "$CONF" ]]; then
     echo ""
 fi
 
-SERVICES=(sdr-pi-rtl433 sdr-pi-dump1090 sdr-pi-op25 hostapd dnsmasq)
+SERVICES=(sdr-pi-rtl433 sdr-pi-dump1090 sdr-pi-op25 sdr-pi-lorawan hostapd dnsmasq)
 
 printf "%-22s %-10s %-10s %s\n" "SERVICE" "ENABLED" "ACTIVE" "STATUS"
 printf "%-22s %-10s %-10s %s\n" "-------" "-------" "------" "------"
@@ -31,6 +31,14 @@ for svc in "${SERVICES[@]}"; do
 
     printf "%-22s %-10s %-10s %s\n" "$svc" "$enabled" "$active" "$status"
 done
+
+echo ""
+echo "LoRaWAN concentrator:"
+if [[ -e /dev/spidev0.0 ]]; then
+    echo "  SPI device: /dev/spidev0.0 (present)"
+else
+    echo "  SPI device: not found (check dtoverlay in config.txt)"
+fi
 
 echo ""
 echo "RTL-SDR devices:"

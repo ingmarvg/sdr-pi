@@ -22,3 +22,6 @@ force_turbo=1
 # Raise thermal throttle threshold from 80C to 85C.
 # The Pi will still emergency-shutdown at 90C.
 temp_soft_limit=85
+
+# Enable SPI for RAK2245 LoRaWAN concentrator HAT.
+dtparam=spi=on

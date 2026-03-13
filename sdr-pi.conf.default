@@ -5,7 +5,7 @@
 # General
 # ---------------------------------------------------------------------------
 
-# Protocols to enable on boot (space-separated): tpms pocsag adsb p25
+# Protocols to enable on boot (space-separated): tpms pocsag adsb p25 lorawan
 ENABLED_PROTOCOLS="tpms adsb"
 
 # ---------------------------------------------------------------------------
@@ -51,3 +51,13 @@ OP25_GAIN="auto"
 OP25_PORT="23456"
 # Values are word-split on spaces; do not use shell metacharacters.
 OP25_EXTRA_ARGS=""
+
+# ---------------------------------------------------------------------------
+# LoRaWAN  (RAK2245 on port 1680)
+# ---------------------------------------------------------------------------
+LORAWAN_PORT="1680"
+LORAWAN_REGION="us915"
+LORAWAN_RESET_PIN="17"
+LORAWAN_CONF_DIR="/etc/sdr-pi/lorawan"
+# Values are word-split on spaces; do not use shell metacharacters.
+LORAWAN_EXTRA_ARGS=""

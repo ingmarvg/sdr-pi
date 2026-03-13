@@ -14,7 +14,7 @@ fi
 # ── Create sdr user ──────────────────────────────────────────────────────────
 if ! id -u sdr &>/dev/null; then
     echo ">>> Creating sdr user..."
-    useradd -r -m -s /bin/bash -G plugdev sdr
+    useradd -r -m -s /bin/bash -G plugdev,spi,gpio sdr
     echo "sdr:sdr" | chpasswd
     echo "    Default password is 'sdr' — change it after first login."
 fi
@@ -32,6 +32,9 @@ echo ">>> Building dump1090..."
 echo ">>> Building OP25..."
 "$SCRIPT_DIR/setup-op25.sh"
 
+echo ">>> Building LoRaWAN packet forwarder..."
+"$SCRIPT_DIR/setup-lorawan.sh"
+
 # ── Install configuration ────────────────────────────────────────────────────
 echo ">>> Installing configuration..."
 mkdir -p /etc/sdr-pi
@@ -45,6 +48,7 @@ fi
 # ── Install udev rules ──────────────────────────────────────────────────────
 echo ">>> Installing udev rules..."
 cp "$PROJECT_DIR/config/udev/99-rtlsdr.rules" /etc/udev/rules.d/
+cp "$PROJECT_DIR/config/udev/99-lorawan-spi.rules" /etc/udev/rules.d/
 udevadm control --reload-rules || true
 
 # ── Install kernel and boot tuning ────────────────────────────────────────
@@ -65,7 +69,7 @@ fi
 # ── Install wrapper scripts ──────────────────────────────────────────────────
 echo ">>> Installing scripts..."
 for script in sdr-pi-rtl433-wrapper sdr-pi-dump1090-wrapper sdr-pi-op25-wrapper \
-              sdr-pi-apply-config sdr-pi-status; do
+              sdr-pi-lorawan-wrapper sdr-pi-apply-config sdr-pi-status; do
     cp "$SCRIPT_DIR/$script" /usr/local/bin/
     chmod 755 "/usr/local/bin/$script"
 done

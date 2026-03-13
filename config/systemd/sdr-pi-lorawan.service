@@ -1,0 +1,23 @@
+[Unit]
+Description=sdr-pi LoRaWAN gateway (RAK2245 SX1301)
+After=network-online.target sdr-pi-performance.service
+Wants=network-online.target
+Requires=sdr-pi-performance.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/sdr-pi/sdr-pi.conf
+ExecStart=/usr/local/bin/sdr-pi-lorawan-wrapper
+Restart=on-failure
+RestartSec=5
+User=sdr
+Group=spi
+
+# LoRaWAN concentrator uses SPI (not USB) — lightweight, shares core 0.
+# The SX1301 handles all DSP on-chip; host CPU load is minimal.
+Nice=-5
+CPUAffinity=0
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,2 @@
+# Allow sdr user (via spi group) to access SPI devices for RAK2245.
+SUBSYSTEM=="spidev", GROUP="spi", MODE="0660"

@@ -79,12 +79,14 @@ fi
 ENABLE_RTL433=false
 ENABLE_DUMP1090=false
 ENABLE_OP25=false
+ENABLE_LORAWAN=false
 
 for proto in ${ENABLED_PROTOCOLS:-}; do
     case "$proto" in
         tpms|pocsag) ENABLE_RTL433=true ;;
         adsb)        ENABLE_DUMP1090=true ;;
         p25)         ENABLE_OP25=true ;;
+        lorawan)     ENABLE_LORAWAN=true ;;
         *)           echo "Warning: unknown protocol '${proto}'" >&2 ;;
     esac
 done
@@ -103,6 +105,7 @@ apply_service() {
 apply_service sdr-pi-rtl433  "$ENABLE_RTL433"
 apply_service sdr-pi-dump1090 "$ENABLE_DUMP1090"
 apply_service sdr-pi-op25    "$ENABLE_OP25"
+apply_service sdr-pi-lorawan "$ENABLE_LORAWAN"
 
 systemctl enable hostapd 2>/dev/null || true
 systemctl enable dnsmasq 2>/dev/null || true

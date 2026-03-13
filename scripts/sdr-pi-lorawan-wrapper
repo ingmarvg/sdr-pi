@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Wrapper for lora_pkt_fwd + lora_json_bridge that reads sdr-pi.conf
+# and serves LoRaWAN JSON over TCP.
+set -euo pipefail
+
+source /etc/sdr-pi/sdr-pi.conf
+
+PORT="${LORAWAN_PORT:-1680}"
+REGION="${LORAWAN_REGION:-us915}"
+RESET_PIN="${LORAWAN_RESET_PIN:-17}"
+CONF_DIR="${LORAWAN_CONF_DIR:-/etc/sdr-pi/lorawan}"
+
+# ── Copy region template on first run ──────────────────────────────────────
+if [[ ! -f "${CONF_DIR}/global_conf.json" ]]; then
+    TEMPLATE="${CONF_DIR}/global_conf.${REGION}.json"
+    if [[ -f "$TEMPLATE" ]]; then
+        cp "$TEMPLATE" "${CONF_DIR}/global_conf.json"
+    else
+        echo "Error: no template for region '${REGION}' at ${TEMPLATE}" >&2
+        exit 1
+    fi
+fi
+
+# ── Reset the RAK2245 concentrator via GPIO ────────────────────────────────
+# The SX1301 requires a hardware reset pulse before initialization.
+GPIO_PATH="/sys/class/gpio/gpio${RESET_PIN}"
+if [[ ! -d "$GPIO_PATH" ]]; then
+    echo "$RESET_PIN" > /sys/class/gpio/export 2>/dev/null || true
+    sleep 0.1
+fi
+echo "out" > "${GPIO_PATH}/direction"
+echo "0"   > "${GPIO_PATH}/value"
+sleep 0.1
+echo "1"   > "${GPIO_PATH}/value"
+sleep 0.1
+
+# ── Start the UDP-to-TCP JSON bridge ──────────────────────────────────────
+lora_json_bridge -p "$PORT" -u 1700 &
+BRIDGE_PID=$!
+trap 'kill $BRIDGE_PID 2>/dev/null || true' EXIT
+
+# NOTE: LORAWAN_EXTRA_ARGS is intentionally unquoted to allow word-splitting
+# into separate arguments. Values must not contain shell metacharacters.
+cd "$CONF_DIR"
+exec lora_pkt_fwd ${LORAWAN_EXTRA_ARGS:-}

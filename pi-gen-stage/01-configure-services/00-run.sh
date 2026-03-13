@@ -5,17 +5,25 @@
 # Copy files into the chroot.
 mkdir -p "${ROOTFS_DIR}/etc/sdr-pi"
 install -m 644 files/sdr-pi.conf     "${ROOTFS_DIR}/etc/sdr-pi/sdr-pi.conf"
-install -m 644 files/99-rtlsdr.rules "${ROOTFS_DIR}/etc/udev/rules.d/99-rtlsdr.rules"
+install -m 644 files/99-rtlsdr.rules      "${ROOTFS_DIR}/etc/udev/rules.d/99-rtlsdr.rules"
+install -m 644 files/99-lorawan-spi.rules "${ROOTFS_DIR}/etc/udev/rules.d/99-lorawan-spi.rules"
+
+# LoRaWAN concentrator configuration
+mkdir -p "${ROOTFS_DIR}/etc/sdr-pi/lorawan"
+install -m 644 files/global_conf.us915.json "${ROOTFS_DIR}/etc/sdr-pi/lorawan/"
+install -m 644 files/global_conf.eu868.json "${ROOTFS_DIR}/etc/sdr-pi/lorawan/"
 
 install -m 755 files/sdr-pi-rtl433-wrapper  "${ROOTFS_DIR}/usr/local/bin/"
 install -m 755 files/sdr-pi-dump1090-wrapper "${ROOTFS_DIR}/usr/local/bin/"
 install -m 755 files/sdr-pi-op25-wrapper     "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-lorawan-wrapper  "${ROOTFS_DIR}/usr/local/bin/"
 install -m 755 files/sdr-pi-apply-config     "${ROOTFS_DIR}/usr/local/bin/"
 install -m 755 files/sdr-pi-status           "${ROOTFS_DIR}/usr/local/bin/"
 
 install -m 644 files/sdr-pi-rtl433.service       "${ROOTFS_DIR}/etc/systemd/system/"
 install -m 644 files/sdr-pi-dump1090.service     "${ROOTFS_DIR}/etc/systemd/system/"
 install -m 644 files/sdr-pi-op25.service          "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/sdr-pi-lorawan.service        "${ROOTFS_DIR}/etc/systemd/system/"
 install -m 644 files/sdr-pi-performance.service   "${ROOTFS_DIR}/etc/systemd/system/"
 
 # Kernel and boot tuning
@@ -54,7 +62,7 @@ on_chroot <<'CHROOT'
 set -euo pipefail
 
 # Create sdr user
-useradd -r -m -s /bin/bash -G plugdev sdr
+useradd -r -m -s /bin/bash -G plugdev,spi,gpio sdr
 echo "sdr:sdr" | chpasswd
 
 # Apply configuration (generates hostapd/dnsmasq config, enables services)
