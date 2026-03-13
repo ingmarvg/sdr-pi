@@ -5,12 +5,19 @@
 # Build acceleration:
 #   - eatmydata: skips fsync() calls (expensive under QEMU emulation)
 #   - ccache: caches compiled objects across rebuilds (mount /ccache from host)
-#   - Parallel builds: rtl_433 + dump1090 compile concurrently after librtlsdr
+#   - Parallel builds: rtl_433 + dump1090 + OP25 + lorawan compile concurrently
 #
 # Resilience:
 #   - retry(): retries transient failures with exponential backoff
 #   - apt_update_strict(): catches partial apt-get update failures
 #   - git_clone_retry(): retries git clones with cleanup between attempts
+
+# Stage lora_json_bridge source into the chroot's /tmp for the build.
+STAGE_DIR="$(dirname "$0")"
+if [ -f "${STAGE_DIR}/../01-configure-services/files/lora_json_bridge.c" ]; then
+    cp "${STAGE_DIR}/../01-configure-services/files/lora_json_bridge.c" \
+        "${ROOTFS_DIR}/tmp/lora_json_bridge.c"
+fi
 
 on_chroot <<'CHROOT'
 set -euo pipefail
@@ -125,8 +132,8 @@ blacklist rtl2832
 blacklist rtl2830
 MOD
 
-# ── Build rtl_433, dump1090, and OP25 in parallel ────────────────────────
-# librtlsdr is installed; the remaining three are independent of each other.
+# ── Build rtl_433, dump1090, OP25, and LoRaWAN in parallel ────────────────
+# librtlsdr is installed; the remaining four are independent of each other.
 
 build_rtl433() {
     cd /tmp \
@@ -134,7 +141,7 @@ build_rtl433() {
     && cd rtl_433 && mkdir build && cd build \
     && cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local \
         -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS" \
-    && make -j"$(( $(nproc) / 3 + 1 ))" && make install \
+    && make -j"$(( $(nproc) / 4 + 1 ))" && make install \
     && cd /tmp && rm -rf rtl_433
 }
 
@@ -142,44 +149,68 @@ build_dump1090() {
     cd /tmp \
     && git_clone_retry --branch v1.14 --depth 1 https://github.com/mutability/dump1090.git dump1090-src \
     && cd dump1090-src \
-    && make -j"$(( $(nproc) / 3 + 1 ))" CFLAGS="$SDR_PI_CFLAGS -fcommon" \
+    && make -j"$(( $(nproc) / 4 + 1 ))" CFLAGS="$SDR_PI_CFLAGS -fcommon" \
     && cp dump1090 /usr/local/bin/dump1090-mutability \
     && chmod 755 /usr/local/bin/dump1090-mutability \
     && cd /tmp && rm -rf dump1090-src
 }
 
 build_op25() {
-    local OP25_COMMIT="5dfc043"
+    local OP25_COMMIT="0f0116572f837fe8fc326c1f4f89e6c435b1823d"
     local OP25_URL="https://github.com/boatbod/op25/archive/${OP25_COMMIT}.tar.gz"
     cd /tmp \
     && retry 3 "OP25 download" wget -q --timeout=30 -O op25.tar.gz "$OP25_URL" \
     && mkdir op25 && tar xzf op25.tar.gz -C op25 --strip-components=1 && rm op25.tar.gz \
     && cd op25/op25/gr-op25_repeater && mkdir build && cd build \
     && cmake .. -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS" \
-    && make -j"$(( $(nproc) / 3 + 1 ))" && make install && ldconfig \
+    && make -j"$(( $(nproc) / 4 + 1 ))" && make install && ldconfig \
     && cp -r /tmp/op25/op25/gr-op25_repeater/apps /opt/op25 \
     && ln -sf /opt/op25/rx.py /usr/local/bin/rx.py \
     && cd /tmp && rm -rf op25
 }
 
+build_lorawan() {
+    cd /tmp \
+    && git_clone_retry --branch v5.0.1 --depth 1 \
+        https://github.com/Lora-net/lora_gateway.git lora_gateway \
+    && cd lora_gateway \
+    && make -j"$(( $(nproc) / 4 + 1 ))" CFLAGS="$SDR_PI_CFLAGS" \
+    && cd /tmp \
+    && git_clone_retry --branch v4.0.1 --depth 1 \
+        https://github.com/Lora-net/packet_forwarder.git packet_forwarder \
+    && cd packet_forwarder \
+    && make -j"$(( $(nproc) / 4 + 1 ))" CFLAGS="$SDR_PI_CFLAGS" \
+    && cp lora_pkt_fwd/lora_pkt_fwd /usr/local/bin/ \
+    && chmod 755 /usr/local/bin/lora_pkt_fwd \
+    && cd /tmp && rm -rf lora_gateway packet_forwarder
+    # Build the UDP-to-TCP JSON bridge (staged into chroot /tmp by outer script).
+    gcc $SDR_PI_CFLAGS -Wall -Wextra \
+        -o /usr/local/bin/lora_json_bridge \
+        /tmp/lora_json_bridge.c
+    chmod 755 /usr/local/bin/lora_json_bridge
+}
+
 # Export so subshells can use them.
 export SDR_PI_CFLAGS
 export -f retry git_clone_retry
-export -f build_rtl433 build_dump1090 build_op25
+export -f build_rtl433 build_dump1090 build_op25 build_lorawan
 
-echo ">>> Building rtl_433, dump1090, and OP25 in parallel..."
+echo ">>> Building rtl_433, dump1090, OP25, and LoRaWAN in parallel..."
 retry 2 "rtl_433 build" build_rtl433 &
 PID_RTL433=$!
 retry 2 "dump1090 build" build_dump1090 &
 PID_DUMP1090=$!
 retry 2 "OP25 build" build_op25 &
 PID_OP25=$!
+retry 2 "lorawan build" build_lorawan &
+PID_LORAWAN=$!
 
-# Wait for all three and fail if any failed.
+# Wait for all four and fail if any failed.
 FAILED=0
 wait $PID_RTL433  || { echo "ERROR: rtl_433 build failed after retries" >&2; FAILED=1; }
 wait $PID_DUMP1090 || { echo "ERROR: dump1090 build failed after retries" >&2; FAILED=1; }
 wait $PID_OP25    || { echo "ERROR: OP25 build failed after retries" >&2; FAILED=1; }
+wait $PID_LORAWAN || { echo "ERROR: lorawan build failed after retries" >&2; FAILED=1; }
 
 if [ "$FAILED" -ne 0 ]; then
     exit 1
