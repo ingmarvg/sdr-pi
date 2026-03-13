@@ -85,12 +85,12 @@ git_clone_retry() {
 # ── Build acceleration ────────────────────────────────────────────────────
 # eatmydata: disable fsync() — QEMU emulates it slowly.
 retry 3 "apt-get update" apt_update_strict
-retry 3 "install eatmydata" apt-get install -y eatmydata
+retry 3 "install eatmydata" apt-get install -y -o Acquire::Retries=5 eatmydata
 EATMYDATA="eatmydata"
 
 # ccache: reuse compiled objects across rebuilds.
 # The build script mounts a host volume at /ccache if available.
-retry 3 "install ccache" $EATMYDATA apt-get install -y ccache
+retry 3 "install ccache" $EATMYDATA apt-get install -y -o Acquire::Retries=5 ccache
 if [ -d /ccache ]; then
     export CCACHE_DIR=/ccache
     export CCACHE_MAXSIZE=2G
@@ -110,12 +110,27 @@ elif [ "$(uname -m)" = "armv7l" ]; then
     SDR_PI_CFLAGS="$SDR_PI_CFLAGS -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard"
 fi
 
-# ── Install build dependencies up front ───────────────────────────────────
-retry 3 "install build dependencies" $EATMYDATA apt-get install -y --no-install-recommends \
+# ── Install build dependencies ────────────────────────────────────────────
+# Split into core deps (rtl_433, dump1090, lorawan) and OP25 deps (gnuradio).
+# This way, a gnuradio download failure doesn't block the other builds.
+# Acquire::Retries makes apt retry individual failed package downloads.
+APT_RETRY="-o Acquire::Retries=5"
+
+retry 3 "install core build deps" \
+    $EATMYDATA apt-get install -y $APT_RETRY --no-install-recommends \
     git libusb-1.0-0-dev cmake build-essential pkg-config \
-    gnuradio gnuradio-dev libboost-all-dev libcppunit-dev swig \
-    python3-numpy python3-waitress python3-requests \
     hostapd dnsmasq
+
+# OP25 requires gnuradio (~200 MB of packages).  Install separately so
+# failure here doesn't block rtl_433, dump1090, or lorawan.
+OP25_DEPS_OK=1
+if ! retry 3 "install OP25 deps (gnuradio)" \
+    $EATMYDATA apt-get install -y $APT_RETRY --no-install-recommends \
+    gnuradio gnuradio-dev libboost-all-dev libcppunit-dev swig \
+    python3-numpy python3-waitress python3-requests; then
+    echo "WARNING: OP25 dependencies failed to install — OP25 build will be skipped." >&2
+    OP25_DEPS_OK=0
+fi
 
 # ── Build librtlsdr (dependency for rtl_433 and dump1090) ────────────────
 cd /tmp
@@ -191,7 +206,7 @@ build_lorawan() {
 }
 
 # Export so subshells can use them.
-export SDR_PI_CFLAGS
+export SDR_PI_CFLAGS OP25_DEPS_OK
 export -f retry git_clone_retry
 export -f build_rtl433 build_dump1090 build_op25 build_lorawan
 
@@ -200,17 +215,27 @@ retry 2 "rtl_433 build" build_rtl433 &
 PID_RTL433=$!
 retry 2 "dump1090 build" build_dump1090 &
 PID_DUMP1090=$!
-retry 2 "OP25 build" build_op25 &
-PID_OP25=$!
 retry 2 "lorawan build" build_lorawan &
 PID_LORAWAN=$!
 
-# Wait for all four and fail if any failed.
+# OP25 is optional — skip if gnuradio deps failed to install.
+PID_OP25=""
+if [ "$OP25_DEPS_OK" -eq 1 ]; then
+    retry 2 "OP25 build" build_op25 &
+    PID_OP25=$!
+else
+    echo ">>> Skipping OP25 build (dependencies unavailable)"
+fi
+
+# Wait for builds — core builds are required, OP25 is best-effort.
 FAILED=0
 wait $PID_RTL433  || { echo "ERROR: rtl_433 build failed after retries" >&2; FAILED=1; }
 wait $PID_DUMP1090 || { echo "ERROR: dump1090 build failed after retries" >&2; FAILED=1; }
-wait $PID_OP25    || { echo "ERROR: OP25 build failed after retries" >&2; FAILED=1; }
 wait $PID_LORAWAN || { echo "ERROR: lorawan build failed after retries" >&2; FAILED=1; }
+
+if [ -n "$PID_OP25" ]; then
+    wait $PID_OP25 || { echo "WARNING: OP25 build failed — image will work without P25 support." >&2; }
+fi
 
 if [ "$FAILED" -ne 0 ]; then
     exit 1
