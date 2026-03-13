@@ -160,6 +160,32 @@ if ! grep -q 'sdr-pi-patched' "$PIGEN_BUILD_DOCKER" 2>/dev/null; then
     sed -i 's|x86_64\|aarch64)|x86_64)  # sdr-pi-patched|' "$PIGEN_BUILD_DOCKER"
 fi
 
+# ── Patch pi-gen apt sources for mirror reliability ──────────────────────────
+# The default raspbian.raspberrypi.com single server drops connections under
+# load.  Switch to mirrordirector.raspbian.org (CDN with multiple backends)
+# and add Acquire::Retries so apt retries individual package downloads.
+PIGEN_SOURCES="${PIGEN_DIR}/stage0/00-configure-apt/files/sources.list"
+if grep -q 'raspbian.raspberrypi.com' "$PIGEN_SOURCES" 2>/dev/null; then
+    echo ">>> Patching pi-gen apt sources (CDN mirror + retries)..."
+    sed -i 's|raspbian.raspberrypi.com/raspbian|mirrordirector.raspbian.org/raspbian|g' "$PIGEN_SOURCES"
+fi
+# Also patch the debootstrap mirror URL in stage0/prerun.sh.
+PIGEN_PRERUN="${PIGEN_DIR}/stage0/prerun.sh"
+if grep -q 'raspbian.raspberrypi.com' "$PIGEN_PRERUN" 2>/dev/null; then
+    sed -i 's|raspbian.raspberrypi.com/raspbian|mirrordirector.raspbian.org/raspbian|g' "$PIGEN_PRERUN"
+fi
+# Add global apt retry config so all package installs (including pi-gen's
+# internal stage package lists) retry on transient network failures.
+PIGEN_APT_RETRY="${PIGEN_DIR}/stage0/00-configure-apt/files/99-sdr-pi-retries"
+if [[ ! -f "$PIGEN_APT_RETRY" ]]; then
+    echo 'Acquire::Retries "5";' > "$PIGEN_APT_RETRY"
+fi
+# Install it via the apt configuration script.
+PIGEN_APT_SCRIPT="${PIGEN_DIR}/stage0/00-configure-apt/00-run.sh"
+if ! grep -q '99-sdr-pi-retries' "$PIGEN_APT_SCRIPT" 2>/dev/null; then
+    sed -i '/install -m 644 files\/sources.list/a install -m 644 files/99-sdr-pi-retries "${ROOTFS_DIR}/etc/apt/apt.conf.d/"' "$PIGEN_APT_SCRIPT"
+fi
+
 # ── Clean previous build if requested ────────────────────────────────────────
 if [[ "${SDR_PI_CLEAN:-0}" == "1" ]]; then
     echo ">>> Cleaning previous build state..."
