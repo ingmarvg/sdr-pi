@@ -106,8 +106,10 @@ preflight_checks() {
     echo ">>> Preflight: all checks passed"
 }
 
-if [[ "${SDR_PI_SKIP_PREFLIGHT:-0}" != "1" ]]; then
+if [[ "${SDR_PI_SKIP_PREFLIGHT:-0}" != "1" ]] && [[ "${SDR_PI_CONTINUE:-0}" != "1" ]]; then
     preflight_checks
+elif [[ "${SDR_PI_CONTINUE:-0}" == "1" ]]; then
+    echo ">>> Preflight: skipped (CONTINUE mode)"
 fi
 
 # ── QEMU binfmt_misc setup ────────────────────────────────────────────────
@@ -321,20 +323,65 @@ touch "${PIGEN_DIR}/stage3/SKIP" "${PIGEN_DIR}/stage4/SKIP" "${PIGEN_DIR}/stage5
 touch "${PIGEN_DIR}/stage3/SKIP_IMAGES" "${PIGEN_DIR}/stage4/SKIP_IMAGES" "${PIGEN_DIR}/stage5/SKIP_IMAGES"
 
 # ── Stage skipping — resume from previous build ─────────────────────────────
-# pi-gen creates a SKIP file in each completed stage's work directory.  When
-# SDR_PI_CONTINUE=1, we mark base stages (0–2) as skippable if their work
-# directory already exists, so only our custom stage is rebuilt.  This cuts
-# rebuild time from ~60 min to ~10 min after the first full build.
-if [[ "${SDR_PI_CONTINUE:-0}" == "1" ]]; then
-    echo ">>> Continuing previous build (skipping completed stages)..."
-    export CONTINUE=1
-    for stage_num in 0 1 2; do
-        work_dir="${PIGEN_DIR}/work/sdr-pi/stage${stage_num}"
-        if [[ -d "$work_dir" ]]; then
-            echo "    Skipping stage${stage_num} (already built)"
-            touch "${PIGEN_DIR}/stage${stage_num}/SKIP"
+# CONTINUE mode reuses Docker volumes from a previous build, skipping
+# completed stages.  This is only safe when base stages (0–2) finished
+# successfully — a failed debootstrap (stage0) leaves a work directory with
+# a broken rootfs, and blindly skipping it cascades into every later stage.
+#
+# We validate stage completion by checking key files inside the Docker volume.
+# If validation fails, we remove the container and force a clean rebuild.
+
+validate_stages_in_docker() {
+    # Check key files inside the pigen_work container's volumes to verify
+    # that base stages actually completed.  Returns 0 if all stages that
+    # have work directories are complete.
+    local container="pigen_work"
+    if ! docker ps -a --filter name="^${container}$" -q 2>/dev/null | grep -q .; then
+        return 1  # no container = nothing to validate
+    fi
+    local checks=(
+        "/pi-gen/work/sdr-pi/stage0/rootfs/bin/sh"
+        "/pi-gen/work/sdr-pi/stage1/rootfs/usr/bin/apt"
+        "/pi-gen/work/sdr-pi/stage2/rootfs/usr/bin/ssh"
+    )
+    for path in "${checks[@]}"; do
+        local stage_dir
+        stage_dir=$(echo "$path" | grep -o 'stage[0-9]')
+        # Only check stages that have a work directory.
+        if docker run --rm --volumes-from "$container" alpine \
+            test -d "/pi-gen/work/sdr-pi/${stage_dir}" 2>/dev/null; then
+            if ! docker run --rm --volumes-from "$container" alpine \
+                test -f "$path" 2>/dev/null; then
+                echo "    ${stage_dir}: INCOMPLETE (missing $(basename "$path"))"
+                return 1
+            fi
+            echo "    ${stage_dir}: complete"
         fi
     done
+    return 0
+}
+
+apply_continue_mode() {
+    echo ">>> Validating previous build state..."
+    if validate_stages_in_docker; then
+        echo ">>> Base stages verified — skipping to custom stage."
+        export CONTINUE=1
+        for stage_num in 0 1 2; do
+            touch "${PIGEN_DIR}/stage${stage_num}/SKIP"
+        done
+    else
+        echo ">>> Incomplete stages detected — cleaning for full rebuild."
+        docker rm -v pigen_work >/dev/null 2>&1 || true
+        docker rm -v pigen_work_cont >/dev/null 2>&1 || true
+        # Don't set CONTINUE — start fresh.
+        for stage_num in 0 1 2; do
+            rm -f "${PIGEN_DIR}/stage${stage_num}/SKIP"
+        done
+    fi
+}
+
+if [[ "${SDR_PI_CONTINUE:-0}" == "1" ]]; then
+    apply_continue_mode
 fi
 
 # ── ccache volume ────────────────────────────────────────────────────────────
@@ -375,10 +422,11 @@ fi
 
 # ── Handle stale Docker container ───────────────────────────────────────────
 # pi-gen's build-docker.sh refuses to start if a container from a previous
-# (possibly failed) build still exists.  When continuing, keep the container
-# (pi-gen reuses its volumes to skip completed work).  Otherwise remove it.
+# (possibly failed) build still exists.  In CONTINUE mode, apply_continue_mode
+# already handled it (keeping valid containers, removing broken ones).
+# For fresh builds, remove the stale container.
 if docker ps -a --filter name=pigen_work -q | grep -q .; then
-    if [[ "${SDR_PI_CONTINUE:-0}" == "1" ]] || [[ "${CONTINUE:-0}" == "1" ]]; then
+    if [[ "${CONTINUE:-0}" == "1" ]]; then
         echo ">>> Keeping pigen_work container (CONTINUE mode)"
     else
         echo ">>> Removing stale pigen_work container..."
@@ -391,7 +439,7 @@ fi
 # stages).  pi-gen's CONTINUE creates an ephemeral "pigen_work_cont" container
 # that mounts volumes from the original "pigen_work" container, preserving
 # work from previous attempts.
-SDR_PI_RETRIES="${SDR_PI_RETRIES:-2}"
+SDR_PI_RETRIES="${SDR_PI_RETRIES:-1}"
 BUILD_ATTEMPT=0
 BUILD_SUCCESS=0
 
@@ -400,26 +448,22 @@ while [[ $BUILD_ATTEMPT -le $SDR_PI_RETRIES ]]; do
 
     if [[ $BUILD_ATTEMPT -gt 1 ]]; then
         echo ""
-        echo ">>> Build attempt ${BUILD_ATTEMPT}/$((SDR_PI_RETRIES + 1)) (retrying with CONTINUE mode)..."
+        echo ">>> Build attempt ${BUILD_ATTEMPT}/$((SDR_PI_RETRIES + 1)) (retrying — validating previous state)..."
         echo "    Previous attempt failed at $(date)"
         echo ""
 
-        # On retry, enable CONTINUE mode to reuse volumes from the failed
-        # pigen_work container (skips completed stages).
-        export CONTINUE=1
-
         # Remove the ephemeral continuation container if it lingered.
-        # Do NOT remove pigen_work — it holds the build volumes.
         if docker ps -a --filter name=pigen_work_cont -q 2>/dev/null | grep -q .; then
             docker rm -v pigen_work_cont >/dev/null 2>&1 || true
         fi
 
-        # Re-check apt cache health before retrying.  If the proxy is still
-        # broken, strip APT_PROXY so this attempt uses direct mirrors.
+        # Validate completed stages — clean and start fresh if any are broken.
+        apply_continue_mode
+
+        # Re-check apt cache health before retrying.
         if grep -q '^APT_PROXY=' "${PIGEN_DIR}/config" 2>/dev/null; then
-            echo ">>> Re-checking apt cache before retry..."
             if ! apt_cache_health_check "http://localhost:3142"; then
-                echo "WARNING: apt cache still unavailable, removing proxy config..." >&2
+                echo "WARNING: apt cache unavailable, removing proxy config..." >&2
                 sed -i '/^APT_PROXY=/d' "${PIGEN_DIR}/config"
             fi
         fi
@@ -427,10 +471,8 @@ while [[ $BUILD_ATTEMPT -le $SDR_PI_RETRIES ]]; do
         # Re-prepare our custom stage (may have been modified by pi-gen).
         prepare_stage
 
-        # Brief pause to let transient issues clear.
-        RETRY_DELAY=$(( 15 * BUILD_ATTEMPT ))
-        echo ">>> Waiting ${RETRY_DELAY}s before retry..."
-        sleep "$RETRY_DELAY"
+        # Brief pause for transient issues.
+        sleep 5
     fi
 
     echo ">>> Starting pi-gen Docker build (attempt ${BUILD_ATTEMPT}/$((SDR_PI_RETRIES + 1)))..."
