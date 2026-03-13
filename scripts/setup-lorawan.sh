@@ -41,14 +41,16 @@ git clone --branch "$PKT_FWD_VERSION" --depth 1 \
     https://github.com/Lora-net/packet_forwarder.git "${BUILD_DIR}/packet_forwarder"
 
 # libloragw must be built first (packet_forwarder links against it).
+# Do NOT override CFLAGS — the Makefiles use CFLAGS := ... with -Iinc -I.
+# and a command-line override loses the include paths.
 echo ">>> Building libloragw..."
 cd "${BUILD_DIR}/lora_gateway"
-make -j"$(nproc)" CFLAGS="$SDR_PI_CFLAGS"
+make -j"$(nproc)"
 
 echo ">>> Building packet_forwarder..."
 cd "${BUILD_DIR}/packet_forwarder"
 # The packet_forwarder Makefile expects libloragw in ../lora_gateway.
-make -j"$(nproc)" CFLAGS="$SDR_PI_CFLAGS"
+make -j"$(nproc)"
 
 cp lora_pkt_fwd/lora_pkt_fwd /usr/local/bin/
 chmod 755 /usr/local/bin/lora_pkt_fwd

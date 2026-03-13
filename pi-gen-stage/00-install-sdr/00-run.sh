@@ -185,24 +185,26 @@ build_op25() {
 }
 
 build_lorawan() {
+    # lora_gateway and packet_forwarder use CFLAGS := ... with -Iinc -I.
+    # in their Makefiles.  Do NOT override CFLAGS on the command line or
+    # the include paths are lost and headers won't be found.
     cd /tmp \
     && git_clone_retry --branch v5.0.1 --depth 1 \
         https://github.com/Lora-net/lora_gateway.git lora_gateway \
     && cd lora_gateway \
-    && make -j"$(( $(nproc) / 4 + 1 ))" CFLAGS="$SDR_PI_CFLAGS" \
+    && make -j"$(( $(nproc) / 4 + 1 ))" \
     && cd /tmp \
     && git_clone_retry --branch v4.0.1 --depth 1 \
         https://github.com/Lora-net/packet_forwarder.git packet_forwarder \
     && cd packet_forwarder \
-    && make -j"$(( $(nproc) / 4 + 1 ))" CFLAGS="$SDR_PI_CFLAGS" \
+    && make -j"$(( $(nproc) / 4 + 1 ))" \
     && cp lora_pkt_fwd/lora_pkt_fwd /usr/local/bin/ \
     && chmod 755 /usr/local/bin/lora_pkt_fwd \
-    && cd /tmp && rm -rf lora_gateway packet_forwarder
-    # Build the UDP-to-TCP JSON bridge (staged into chroot /tmp by outer script).
-    gcc $SDR_PI_CFLAGS -Wall -Wextra \
+    && cd /tmp && rm -rf lora_gateway packet_forwarder \
+    && gcc $SDR_PI_CFLAGS -Wall -Wextra \
         -o /usr/local/bin/lora_json_bridge \
-        /tmp/lora_json_bridge.c
-    chmod 755 /usr/local/bin/lora_json_bridge
+        /tmp/lora_json_bridge.c \
+    && chmod 755 /usr/local/bin/lora_json_bridge
 }
 
 # Export so subshells can use them.
