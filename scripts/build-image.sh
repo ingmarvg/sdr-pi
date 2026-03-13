@@ -322,6 +322,13 @@ prepare_stage
 touch "${PIGEN_DIR}/stage3/SKIP" "${PIGEN_DIR}/stage4/SKIP" "${PIGEN_DIR}/stage5/SKIP"
 touch "${PIGEN_DIR}/stage3/SKIP_IMAGES" "${PIGEN_DIR}/stage4/SKIP_IMAGES" "${PIGEN_DIR}/stage5/SKIP_IMAGES"
 
+# Always clean SKIP files for base stages (0-2).  These get baked into the
+# Docker image via COPY and cause stages to be silently skipped even on
+# fresh builds.  Only apply_continue_mode should create them.
+for stage_num in 0 1 2; do
+    rm -f "${PIGEN_DIR}/stage${stage_num}/SKIP"
+done
+
 # ── Stage skipping — resume from previous build ─────────────────────────────
 # CONTINUE mode reuses Docker volumes from a previous build, skipping
 # completed stages.  This is only safe when base stages (0–2) finished
