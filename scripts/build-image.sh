@@ -319,7 +319,8 @@ prepare_stage() {
     cp -r "${PROJECT_DIR}/pi-gen-stage" "${PIGEN_DIR}/stage-sdr-pi"
 
     local STAGE_FILES="${PIGEN_DIR}/stage-sdr-pi/01-configure-services/files"
-    mkdir -p "$STAGE_FILES"
+    local INSTALL_FILES="${PIGEN_DIR}/stage-sdr-pi/00-install-sdr/files"
+    mkdir -p "$STAGE_FILES" "$INSTALL_FILES"
     # Use custom config if SDR_PI_CONF is set, otherwise use default.
     cp "${SDR_PI_CONF:-${PROJECT_DIR}/sdr-pi.conf.default}" "${STAGE_FILES}/sdr-pi.conf"
     cp "${PROJECT_DIR}/config/udev/99-rtlsdr.rules"       "${STAGE_FILES}/"
@@ -327,6 +328,9 @@ prepare_stage() {
     cp "${PROJECT_DIR}/config/lorawan/global_conf.us915.json" "${STAGE_FILES}/"
     cp "${PROJECT_DIR}/config/lorawan/global_conf.eu868.json" "${STAGE_FILES}/"
     cp "${PROJECT_DIR}/src/lora_json_bridge.c"             "${STAGE_FILES}/"
+    # Also stage lora_json_bridge.c next to 00-install-sdr/00-run.sh for reliable
+    # path resolution (pi-gen pushd's into the substage dir before running scripts).
+    cp "${PROJECT_DIR}/src/lora_json_bridge.c"             "${INSTALL_FILES}/"
     cp "${PROJECT_DIR}/config/systemd/"*.service           "${STAGE_FILES}/"
     cp "${PROJECT_DIR}/scripts/sdr-pi-rtl433-wrapper"      "${STAGE_FILES}/"
     cp "${PROJECT_DIR}/scripts/sdr-pi-dump1090-wrapper"    "${STAGE_FILES}/"

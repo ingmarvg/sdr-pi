@@ -13,11 +13,13 @@
 #   - git_clone_retry(): retries git clones with cleanup between attempts
 
 # Stage lora_json_bridge source into the chroot's /tmp for the build.
-# Try multiple paths: the files/ dir (populated by prepare_stage via bind mount)
-# and the sub-stage relative path.  Fail loudly if not found.
+# prepare_stage() copies it to both 00-install-sdr/files/ and
+# 01-configure-services/files/.  Try local files/ first (most reliable).
 BRIDGE_SRC=""
 for candidate in \
+    "$(pwd)/files/lora_json_bridge.c" \
     "$(pwd)/../01-configure-services/files/lora_json_bridge.c" \
+    "$(dirname "$0")/files/lora_json_bridge.c" \
     "$(dirname "$0")/../01-configure-services/files/lora_json_bridge.c"; do
     if [ -f "$candidate" ]; then
         BRIDGE_SRC="$candidate"
@@ -26,10 +28,12 @@ for candidate in \
 done
 if [ -n "$BRIDGE_SRC" ]; then
     cp "$BRIDGE_SRC" "${ROOTFS_DIR}/tmp/lora_json_bridge.c"
-    echo ">>> Staged lora_json_bridge.c into chroot /tmp"
+    echo ">>> Staged lora_json_bridge.c into chroot /tmp (from $BRIDGE_SRC)"
 else
-    echo "WARNING: lora_json_bridge.c not found — lorawan bridge will not be built" >&2
-    echo "    Searched: $(pwd)/../01-configure-services/files/" >&2
+    echo "ERROR: lora_json_bridge.c not found — lorawan build will fail!" >&2
+    echo "    pwd=$(pwd)" >&2
+    echo "    Searched: files/, ../01-configure-services/files/" >&2
+    ls -la "$(pwd)/files/" 2>&1 | head -5 >&2 || true
     ls -la "$(pwd)/../01-configure-services/files/" 2>&1 | head -5 >&2 || true
 fi
 
