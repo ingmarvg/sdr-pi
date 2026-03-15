@@ -61,9 +61,14 @@ sed -i 's|defaults|defaults,noatime,commit=600|' "${ROOTFS_DIR}/etc/fstab"
 on_chroot <<'CHROOT'
 set -euo pipefail
 
-# Create sdr user
-useradd -r -m -s /bin/bash -G plugdev,spi,gpio sdr
-echo "sdr:sdr" | chpasswd
+# Ensure sdr user has the right groups.
+# pi-gen already creates the user (FIRST_USER_NAME=sdr) and sets the password
+# (FIRST_USER_PASSWD from SDR_PI_SSH_PASSWORD), so we only add groups here.
+if id -u sdr &>/dev/null; then
+    usermod -a -G plugdev,spi,gpio sdr
+else
+    useradd -r -m -s /bin/bash -G plugdev,spi,gpio sdr
+fi
 
 # Apply configuration (generates hostapd/dnsmasq config, enables services)
 /usr/local/bin/sdr-pi-apply-config
