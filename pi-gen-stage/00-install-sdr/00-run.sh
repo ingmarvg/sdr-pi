@@ -38,6 +38,14 @@ else
     ls -la "$(pwd)/../01-configure-services/files/" 2>&1 | head -5 >&2 || true
 fi
 
+# Bind-mount the source cache into the rootfs so the chroot can access it.
+# The cache is mounted read-only in Docker at /source-cache by build-image.sh.
+if [ -d /source-cache/git ]; then
+    mkdir -p "${ROOTFS_DIR}/source-cache"
+    mount --bind /source-cache "${ROOTFS_DIR}/source-cache"
+    echo ">>> Source cache available inside chroot at /source-cache"
+fi
+
 on_chroot <<'CHROOT'
 set -euo pipefail
 
@@ -80,14 +88,41 @@ apt_update_strict() {
     return 0
 }
 
-# Git clone with retry and cleanup of partial clones between attempts.
+# Git clone with local cache support and retry.
+# If a bare mirror exists in /source-cache/git/<name>.git, uses --reference
+# to avoid downloading objects from the network (only fetches missing refs).
+# Falls back to a full network clone with retry if no cache is available.
 # Usage: git_clone_retry [git clone args...] <dest_directory>
 git_clone_retry() {
     local max_attempts=3
     local dest="${!#}"  # last argument = destination directory
     local attempt delay
+
+    # Check for a local bare mirror in the source cache.
+    # Extract repo name from the URL (second-to-last arg before dest), not dest name,
+    # because dest can differ (e.g. dump1090.git cloned to dump1090-src).
+    local cache_ref=""
+    local arg url_arg=""
+    for arg in "$@"; do
+        # Find the argument that looks like a git URL.
+        if [[ "$arg" == http* ]] || [[ "$arg" == git@* ]]; then
+            url_arg="$arg"
+        fi
+    done
+    if [ -n "$url_arg" ]; then
+        local bare_name
+        bare_name="$(basename "$url_arg")"
+        # Ensure it ends with .git
+        [[ "$bare_name" == *.git ]] || bare_name="${bare_name}.git"
+        if [ -d "/source-cache/git/${bare_name}" ]; then
+            cache_ref="--reference /source-cache/git/${bare_name}"
+            echo ">>> Using cached mirror for ${bare_name}" >&2
+        fi
+    fi
+
     for attempt in $(seq 1 "$max_attempts"); do
-        if git clone "$@"; then
+        # shellcheck disable=SC2086
+        if git clone $cache_ref "$@"; then
             return 0
         fi
         if [ "$attempt" -lt "$max_attempts" ]; then
@@ -193,7 +228,12 @@ build_op25() {
     local OP25_COMMIT="0f0116572f837fe8fc326c1f4f89e6c435b1823d"
     local OP25_URL="https://github.com/boatbod/op25/archive/${OP25_COMMIT}.tar.gz"
     cd /tmp \
-    && retry 3 "OP25 download" wget -q --timeout=30 -O op25.tar.gz "$OP25_URL" \
+    && if [ -f /source-cache/tarballs/op25.tar.gz ]; then
+        echo ">>> Using cached op25 tarball" >&2
+        cp /source-cache/tarballs/op25.tar.gz op25.tar.gz
+    else
+        retry 3 "OP25 download" wget -q --timeout=30 -O op25.tar.gz "$OP25_URL"
+    fi \
     && mkdir op25 && tar xzf op25.tar.gz -C op25 --strip-components=1 && rm op25.tar.gz \
     && cd op25/op25/gr-op25_repeater && mkdir build && cd build \
     && cmake .. -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS" \
@@ -269,3 +309,9 @@ if [ -d /ccache ]; then
     ccache --show-stats
 fi
 CHROOT
+
+# Clean up source cache bind mount if we created one.
+if mountpoint -q "${ROOTFS_DIR}/source-cache" 2>/dev/null; then
+    umount "${ROOTFS_DIR}/source-cache"
+    rmdir "${ROOTFS_DIR}/source-cache"
+fi

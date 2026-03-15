@@ -431,6 +431,17 @@ CCACHE_DIR="${PROJECT_DIR}/build/ccache"
 mkdir -p "$CCACHE_DIR"
 STAGE_DIR="${PIGEN_DIR}/stage-sdr-pi"
 export PIGEN_DOCKER_OPTS="${PIGEN_DOCKER_OPTS:-} -v ${CCACHE_DIR}:/ccache --dns 8.8.8.8 -v ${STAGE_DIR}:/pi-gen/stage-sdr-pi"
+
+# Mount source cache volume if it exists (populated by scripts/populate-cache.sh).
+# Contains bare git mirrors and pre-downloaded tarballs to avoid network fetches.
+SOURCE_CACHE_VOLUME="sdr-pi-source-cache"
+if docker volume inspect "$SOURCE_CACHE_VOLUME" &>/dev/null; then
+    export PIGEN_DOCKER_OPTS="${PIGEN_DOCKER_OPTS} -v ${SOURCE_CACHE_VOLUME}:/source-cache:ro"
+    echo ">>> source cache: ${SOURCE_CACHE_VOLUME} → /source-cache (read-only)"
+else
+    echo ">>> source cache: not found (run scripts/populate-cache.sh to enable)"
+fi
+
 echo ">>> ccache volume: ${CCACHE_DIR} → /ccache"
 echo ">>> stage volume:  ${STAGE_DIR} → /pi-gen/stage-sdr-pi"
 
