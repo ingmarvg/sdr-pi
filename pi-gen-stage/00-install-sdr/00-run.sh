@@ -12,9 +12,9 @@
 #   - apt_update_strict(): catches partial apt-get update failures
 #   - git_clone_retry(): retries git clones with cleanup between attempts
 
-# Stage lora_json_bridge source into the chroot's /tmp for the build.
-# prepare_stage() copies it to both 00-install-sdr/files/ and
-# 01-configure-services/files/.  Try local files/ first (most reliable).
+# Stage lora_json_bridge source into the chroot for the build.
+# IMPORTANT: on_chroot mounts a tmpfs over ${ROOTFS_DIR}/tmp, so we must
+# stage to a persistent path like /usr/src/ instead.
 BRIDGE_SRC=""
 for candidate in \
     "$(pwd)/files/lora_json_bridge.c" \
@@ -27,8 +27,9 @@ for candidate in \
     fi
 done
 if [ -n "$BRIDGE_SRC" ]; then
-    cp "$BRIDGE_SRC" "${ROOTFS_DIR}/tmp/lora_json_bridge.c"
-    echo ">>> Staged lora_json_bridge.c into chroot /tmp (from $BRIDGE_SRC)"
+    mkdir -p "${ROOTFS_DIR}/usr/src"
+    cp "$BRIDGE_SRC" "${ROOTFS_DIR}/usr/src/lora_json_bridge.c"
+    echo ">>> Staged lora_json_bridge.c into chroot /usr/src/ (from $BRIDGE_SRC)"
 else
     echo "ERROR: lora_json_bridge.c not found — lorawan build will fail!" >&2
     echo "    pwd=$(pwd)" >&2
@@ -221,8 +222,9 @@ build_lorawan() {
     && cd /tmp && rm -rf lora_gateway packet_forwarder \
     && gcc $SDR_PI_CFLAGS -Wall -Wextra \
         -o /usr/local/bin/lora_json_bridge \
-        /tmp/lora_json_bridge.c \
-    && chmod 755 /usr/local/bin/lora_json_bridge
+        /usr/src/lora_json_bridge.c \
+    && chmod 755 /usr/local/bin/lora_json_bridge \
+    && rm -f /usr/src/lora_json_bridge.c
 }
 
 # Export so subshells can use them.
