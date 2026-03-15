@@ -207,6 +207,8 @@ KEYBOARD_KEYMAP=us
 TIMEZONE_DEFAULT=UTC
 # Skip desktop stages (3–5) — headless only.
 STAGE_LIST="stage0 stage1 stage2 stage-sdr-pi"
+# Output raw .img (we handle compression ourselves with xz).
+DEPLOY_ZIP=0
 EOF
 
 # ── apt-cacher-ng ────────────────────────────────────────────────────────────
@@ -551,6 +553,18 @@ mkdir -p "${PROJECT_DIR}/deploy"
 IMG=$(find "${PIGEN_DIR}/deploy" -name "*.img" -printf '%T@ %p\n' 2>/dev/null \
     | sort -rn | head -1 | cut -d' ' -f2-)
 
+# Fallback: if pi-gen zipped the image (DEPLOY_ZIP wasn't set), unzip it.
+if [[ -z "$IMG" ]]; then
+    ZIP=$(find "${PIGEN_DIR}/deploy" -name "image_*.zip" -printf '%T@ %p\n' 2>/dev/null \
+        | sort -rn | head -1 | cut -d' ' -f2-)
+    if [[ -n "$ZIP" ]]; then
+        echo ">>> Extracting image from ${ZIP}..."
+        unzip -o "$ZIP" -d "${PIGEN_DIR}/deploy/"
+        IMG=$(find "${PIGEN_DIR}/deploy" -name "*.img" -printf '%T@ %p\n' 2>/dev/null \
+            | sort -rn | head -1 | cut -d' ' -f2-)
+    fi
+fi
+
 if [[ -n "$IMG" ]]; then
     DATE=$(date +%Y%m%d)
     DEST="${PROJECT_DIR}/deploy/sdr-pi-${DATE}.img"
@@ -560,5 +574,7 @@ if [[ -n "$IMG" ]]; then
     echo "    Size: $(du -h "$DEST" | cut -f1)"
 else
     echo "Error: No .img file found in pi-gen deploy directory." >&2
+    echo "       Contents of deploy/:" >&2
+    ls -lh "${PIGEN_DIR}/deploy/" >&2 2>/dev/null || true
     exit 1
 fi
