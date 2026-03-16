@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Wrapper for DMR (Digital Mobile Radio) decoding via rtl_fm + dsd-fme.
+# Serves decoded JSON over TCP via ncat.
+# Clients connect via: nc <pi-ip> 4002
+set -euo pipefail
+
+source /etc/sdr-pi/sdr-pi.conf
+
+DEVICE_ARG=""
+if [[ -n "${DMR_DEVICE_SERIAL:-}" ]]; then
+    DEVICE_ARG="-d ${DMR_DEVICE_SERIAL}"
+fi
+
+GAIN_ARG=""
+if [[ "${DMR_GAIN:-auto}" != "auto" ]]; then
+    GAIN_ARG="-g ${DMR_GAIN}"
+fi
+
+PORT="${DMR_PORT:-4002}"
+FREQ="${DMR_FREQUENCY:-460M}"
+
+# Pipeline: rtl_fm demodulates → dsd-fme decodes DMR → ncat serves TCP
+exec rtl_fm \
+    -f "${FREQ}" \
+    -s 48000 \
+    ${DEVICE_ARG} \
+    ${GAIN_ARG} \
+    ${DMR_EXTRA_ARGS:-} \
+    2>/dev/null \
+    | dsd-fme -i - -o /dev/null -N 2>/dev/null \
+    | ncat -lk --send-only 0.0.0.0 "${PORT}"

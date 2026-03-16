@@ -200,11 +200,12 @@ IMG_NAME=sdr-pi
 RELEASE=bookworm
 TARGET_HOSTNAME=sdr-pi
 FIRST_USER_NAME=sdr
-FIRST_USER_PASSWD=${SDR_PI_SSH_PASSWORD:-sdr}
+FIRST_USER_PASS=${SDR_PI_SSH_PASSWORD:-sdr}
 ENABLE_SSH=1
 LOCALE_DEFAULT=en_US.UTF-8
 KEYBOARD_KEYMAP=us
 TIMEZONE_DEFAULT=UTC
+WPA_COUNTRY=US
 # Skip desktop stages (3–5) — headless only.
 STAGE_LIST="stage0 stage1 stage2 stage-sdr-pi"
 # Output raw .img (we handle compression ourselves with xz).
@@ -338,6 +339,11 @@ prepare_stage() {
     cp "${PROJECT_DIR}/scripts/sdr-pi-dump1090-wrapper"    "${STAGE_FILES}/"
     cp "${PROJECT_DIR}/scripts/sdr-pi-op25-wrapper"        "${STAGE_FILES}/"
     cp "${PROJECT_DIR}/scripts/sdr-pi-lorawan-wrapper"     "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/scripts/sdr-pi-pocsag-wrapper"      "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/scripts/sdr-pi-dump978-wrapper"     "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/scripts/sdr-pi-dmr-wrapper"         "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/scripts/sdr-pi-nxdn-wrapper"        "${STAGE_FILES}/"
+    cp "${PROJECT_DIR}/scripts/sdr-pi-meshtastic-wrapper"  "${STAGE_FILES}/"
     cp "${PROJECT_DIR}/scripts/sdr-pi-apply-config"        "${STAGE_FILES}/"
     cp "${PROJECT_DIR}/scripts/sdr-pi-status"              "${STAGE_FILES}/"
     cp "${PROJECT_DIR}/config/sysctl.d/99-sdr-pi.conf"    "${STAGE_FILES}/"

@@ -5,7 +5,13 @@
 # General
 # ---------------------------------------------------------------------------
 
-# Protocols to enable on boot (space-separated): tpms pocsag adsb p25 lorawan
+# Protocols to enable on boot (space-separated):
+#   tpms adsb uat p25 dmr nxdn pocsag lorawan meshtastic
+#   wmbus zwave sidewalk  (these share the rtl_433 instance with tpms)
+#
+# Each RTL-SDR dongle can only tune one frequency at a time.
+# Protocols on different frequencies need separate dongles.
+# Assign dongles via *_DEVICE_SERIAL below.
 ENABLED_PROTOCOLS="tpms adsb"
 
 # ---------------------------------------------------------------------------
@@ -17,18 +23,28 @@ AP_CHANNEL="7"
 AP_IP="192.168.4.1"
 
 # ---------------------------------------------------------------------------
-# RTL-SDR device assignment
+# RTL-SDR / HackRF device assignment
 # Use `rtl_test` to find device serial numbers.
-# Leave blank for auto-assignment.
+# Leave blank for auto-assignment (auto-detects RTL-SDR or HackRF).
+# For HackRF: set RTL433_EXTRA_ARGS="-d soapy:0,driver=hackrf"
 # ---------------------------------------------------------------------------
 RTL433_DEVICE_SERIAL=""
 DUMP1090_DEVICE_SERIAL=""
 OP25_DEVICE_SERIAL=""
+POCSAG_DEVICE_SERIAL=""
+DUMP978_DEVICE_SERIAL=""
+DMR_DEVICE_SERIAL=""
+NXDN_DEVICE_SERIAL=""
 
 # ---------------------------------------------------------------------------
-# rtl_433  (TPMS + POCSAG on port 1234)
+# rtl_433  (TPMS / Wireless M-Bus / Z-Wave / Sidewalk on port 1234)
+# Also decodes weather stations, soil sensors, and 1000+ ISM devices.
+# Use RTL433_FREQUENCY_2 for hop mode across two bands.
 # ---------------------------------------------------------------------------
 RTL433_FREQUENCY="315M"
+# Optional second frequency for hop mode (e.g. "433.92M" for EU TPMS,
+# "868.3M" for EU Wireless M-Bus / Z-Wave, "915M" for US Sidewalk).
+RTL433_FREQUENCY_2=""
 RTL433_GAIN="auto"
 RTL433_PORT="1234"
 # Additional rtl_433 flags (e.g. "-R 59 -R 60" to limit decoders).
@@ -36,12 +52,20 @@ RTL433_PORT="1234"
 RTL433_EXTRA_ARGS=""
 
 # ---------------------------------------------------------------------------
-# dump1090  (ADS-B on port 30003)
+# dump1090  (ADS-B 1090 MHz on port 30003)
 # ---------------------------------------------------------------------------
 DUMP1090_GAIN="max"
 DUMP1090_PORT="30003"
-# Values are word-split on spaces; do not use shell metacharacters.
 DUMP1090_EXTRA_ARGS=""
+
+# ---------------------------------------------------------------------------
+# dump978  (ADS-B UAT 978 MHz on port 4001)
+# Requires a second RTL-SDR dongle (different frequency from dump1090).
+# ---------------------------------------------------------------------------
+DUMP978_GAIN="max"
+DUMP978_PORT="4001"
+DUMP978_DEVICE_SERIAL=""
+DUMP978_EXTRA_ARGS=""
 
 # ---------------------------------------------------------------------------
 # OP25  (P25 on port 23456)
@@ -49,15 +73,50 @@ DUMP1090_EXTRA_ARGS=""
 OP25_FREQUENCY="851M"
 OP25_GAIN="auto"
 OP25_PORT="23456"
-# Values are word-split on spaces; do not use shell metacharacters.
 OP25_EXTRA_ARGS=""
 
 # ---------------------------------------------------------------------------
+# POCSAG  (pager decoding on port 4000)
+# Requires its own RTL-SDR dongle.
+# Common US pager frequencies: 929.6125M, 931.9375M
+# ---------------------------------------------------------------------------
+POCSAG_FREQUENCY="929.6125M"
+POCSAG_GAIN="auto"
+POCSAG_PORT="4000"
+POCSAG_EXTRA_ARGS=""
+
+# ---------------------------------------------------------------------------
+# DMR  (Digital Mobile Radio on port 4002)
+# Requires its own RTL-SDR dongle.
+# ---------------------------------------------------------------------------
+DMR_FREQUENCY="460M"
+DMR_GAIN="auto"
+DMR_PORT="4002"
+DMR_EXTRA_ARGS=""
+
+# ---------------------------------------------------------------------------
+# NXDN  (on port 4003)
+# Requires its own RTL-SDR dongle.
+# ---------------------------------------------------------------------------
+NXDN_FREQUENCY="410M"
+NXDN_GAIN="auto"
+NXDN_PORT="4003"
+NXDN_EXTRA_ARGS=""
+
+# ---------------------------------------------------------------------------
 # LoRaWAN  (RAK2245 on port 1680)
+# Requires SPI-connected LoRa concentrator, not an RTL-SDR.
 # ---------------------------------------------------------------------------
 LORAWAN_PORT="1680"
 LORAWAN_REGION="us915"
 LORAWAN_RESET_PIN="17"
 LORAWAN_CONF_DIR="/etc/sdr-pi/lorawan"
-# Values are word-split on spaces; do not use shell metacharacters.
 LORAWAN_EXTRA_ARGS=""
+
+# ---------------------------------------------------------------------------
+# Meshtastic  (LoRa mesh on port 4004)
+# Requires a USB-connected Meshtastic device, not an RTL-SDR.
+# ---------------------------------------------------------------------------
+MESHTASTIC_PORT="4004"
+MESHTASTIC_SERIAL_PORT="/dev/ttyUSB0"
+MESHTASTIC_EXTRA_ARGS=""

@@ -1,0 +1,18 @@
+[Unit]
+Description=sdr-pi Meshtastic serial bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/sdr-pi/sdr-pi.conf
+ExecStart=/usr/local/bin/sdr-pi-meshtastic-wrapper
+Restart=on-failure
+RestartSec=10
+User=sdr
+Group=dialout
+
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

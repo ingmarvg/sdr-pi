@@ -19,6 +19,9 @@ declare -A GIT_REPOS=(
     [dump1090]="https://github.com/mutability/dump1090.git|v1.14"
     [lora_gateway]="https://github.com/Lora-net/lora_gateway.git|v5.0.1"
     [packet_forwarder]="https://github.com/Lora-net/packet_forwarder.git|v4.0.1"
+    [hackrf]="https://github.com/greatscottgadgets/hackrf.git|v2024.02.1"
+    [SoapySDR]="https://github.com/pothosware/SoapySDR.git|soapy-sdr-0.8.1"
+    [SoapyHackRF]="https://github.com/pothosware/SoapyHackRF.git|soapy-hackrf-0.3.4"
 )
 
 # Tarballs (URL|filename).

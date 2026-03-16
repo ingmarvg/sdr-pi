@@ -13,18 +13,28 @@ mkdir -p "${ROOTFS_DIR}/etc/sdr-pi/lorawan"
 install -m 644 files/global_conf.us915.json "${ROOTFS_DIR}/etc/sdr-pi/lorawan/"
 install -m 644 files/global_conf.eu868.json "${ROOTFS_DIR}/etc/sdr-pi/lorawan/"
 
-install -m 755 files/sdr-pi-rtl433-wrapper  "${ROOTFS_DIR}/usr/local/bin/"
-install -m 755 files/sdr-pi-dump1090-wrapper "${ROOTFS_DIR}/usr/local/bin/"
-install -m 755 files/sdr-pi-op25-wrapper     "${ROOTFS_DIR}/usr/local/bin/"
-install -m 755 files/sdr-pi-lorawan-wrapper  "${ROOTFS_DIR}/usr/local/bin/"
-install -m 755 files/sdr-pi-apply-config     "${ROOTFS_DIR}/usr/local/bin/"
-install -m 755 files/sdr-pi-status           "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-rtl433-wrapper      "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-dump1090-wrapper    "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-op25-wrapper        "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-lorawan-wrapper     "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-pocsag-wrapper      "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-dump978-wrapper     "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-dmr-wrapper         "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-nxdn-wrapper        "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-meshtastic-wrapper  "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-apply-config        "${ROOTFS_DIR}/usr/local/bin/"
+install -m 755 files/sdr-pi-status              "${ROOTFS_DIR}/usr/local/bin/"
 
 install -m 644 files/sdr-pi-rtl433.service       "${ROOTFS_DIR}/etc/systemd/system/"
 install -m 644 files/sdr-pi-dump1090.service     "${ROOTFS_DIR}/etc/systemd/system/"
-install -m 644 files/sdr-pi-op25.service          "${ROOTFS_DIR}/etc/systemd/system/"
-install -m 644 files/sdr-pi-lorawan.service        "${ROOTFS_DIR}/etc/systemd/system/"
-install -m 644 files/sdr-pi-performance.service   "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/sdr-pi-op25.service         "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/sdr-pi-lorawan.service      "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/sdr-pi-pocsag.service       "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/sdr-pi-dump978.service      "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/sdr-pi-dmr.service          "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/sdr-pi-nxdn.service         "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/sdr-pi-meshtastic.service   "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/sdr-pi-performance.service  "${ROOTFS_DIR}/etc/systemd/system/"
 
 # Kernel and boot tuning
 install -m 644 files/99-sdr-pi.conf      "${ROOTFS_DIR}/etc/sysctl.d/"
@@ -34,9 +44,6 @@ install -m 644 files/99-sdr-pi-usb.conf  "${ROOTFS_DIR}/etc/modprobe.d/"
 mkdir -p "${ROOTFS_DIR}/etc/systemd/journald.conf.d"
 install -m 644 files/journald.conf.override \
     "${ROOTFS_DIR}/etc/systemd/journald.conf.d/sdr-pi.conf"
-
-# tmpfs mounts for /tmp, /var/log, /var/tmp
-cat files/sdr-pi.fstab >> "${ROOTFS_DIR}/etc/fstab"
 
 # Append boot firmware config for GPU/thermal/USB tuning.
 BOOT_CONFIG="${ROOTFS_DIR}/boot/firmware/config.txt"
@@ -55,19 +62,33 @@ if [ -f "$CMDLINE" ]; then
     sed -i "s|$| ${PARAMS}|" "$CMDLINE"
 fi
 
-# Set noatime on root partition to reduce SD card writes.
-sed -i 's|defaults|defaults,noatime,commit=600|' "${ROOTFS_DIR}/etc/fstab"
+# Set noatime,commit=600 on real disk partitions only (proc, ext4, vfat).
+# Do NOT touch tmpfs lines — commit= is invalid for tmpfs.
+sed -i '/^proc\|^PARTUUID/s|defaults|defaults,noatime,commit=600|' "${ROOTFS_DIR}/etc/fstab"
+
+# tmpfs mounts for /tmp, /var/log, /var/tmp — appended AFTER the sed above
+# so they are not modified by it.
+cat files/sdr-pi.fstab >> "${ROOTFS_DIR}/etc/fstab"
 
 on_chroot <<'CHROOT'
 set -euo pipefail
 
-# Ensure sdr user has the right groups.
-# pi-gen already creates the user (FIRST_USER_NAME=sdr) and sets the password
-# (FIRST_USER_PASSWD from SDR_PI_SSH_PASSWORD), so we only add groups here.
+# Ensure sdr user exists with the right groups and an unlocked password.
+# pi-gen stage1 creates the user (FIRST_USER_NAME=sdr) and sets the password
+# (FIRST_USER_PASS from SDR_PI_SSH_PASSWORD).  If the user somehow doesn't
+# exist, create a normal (not system) account so the password is not locked.
 if id -u sdr &>/dev/null; then
-    usermod -a -G plugdev,spi,gpio sdr
+    usermod -a -G plugdev,spi,gpio,dialout sdr
 else
-    useradd -r -m -s /bin/bash -G plugdev,spi,gpio sdr
+    useradd -m -s /bin/bash -G plugdev,spi,gpio,dialout sdr
+fi
+# Ensure password is not locked (useradd sets '!' by default).
+# pi-gen should have already set FIRST_USER_PASS, but if the user was
+# recreated above, the password field will be locked.  Unlock it and
+# re-apply the configured password.
+passwd -u sdr 2>/dev/null || true
+if [ -n "${FIRST_USER_PASS:-}" ]; then
+    echo "sdr:${FIRST_USER_PASS}" | chpasswd
 fi
 
 # Apply configuration (generates hostapd/dnsmasq config, enables services)

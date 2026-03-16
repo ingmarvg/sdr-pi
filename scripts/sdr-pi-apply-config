@@ -60,33 +60,50 @@ address=/sdr-pi.local/${AP_IP}
 EOF
 
 # ── Configure network interfaces ─────────────────────────────────────────────
-# eth0: DHCP (default) — for upstream internet / SSH access during development.
-# wlan0: static IP — runs the access point for client devices.
-if ! grep -q "# sdr-pi network" /etc/dhcpcd.conf 2>/dev/null; then
-    echo ">>> Configuring eth0 (DHCP) and wlan0 (static ${AP_IP})..."
-    cat >> /etc/dhcpcd.conf <<EOF
+# Bookworm uses NetworkManager, not dhcpcd.
+# eth0: managed by NM with DHCP (default — no config needed).
+# wlan0: unmanaged by NM — hostapd handles it directly.
 
-# sdr-pi network
-# eth0 uses DHCP by default — no configuration needed.
-# Explicitly prevent dhcpcd from touching wlan0 (hostapd manages it).
-interface wlan0
-    static ip_address=${AP_IP}/24
-    nohook wpa_supplicant
+echo ">>> Configuring NetworkManager to leave wlan0 unmanaged..."
+mkdir -p /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/sdr-pi.conf <<EOF
+[keyfile]
+unmanaged-devices=interface-name:wlan0
 EOF
-fi
+
+# Assign static IP to wlan0 before hostapd starts.
+echo ">>> Configuring wlan0 static IP (${AP_IP}/24)..."
+mkdir -p /etc/systemd/system/hostapd.service.d
+cat > /etc/systemd/system/hostapd.service.d/sdr-pi-static-ip.conf <<EOF
+[Service]
+ExecStartPre=/usr/sbin/rfkill unblock wifi
+ExecStartPre=/sbin/ip link set wlan0 up
+ExecStartPre=/sbin/ip addr flush dev wlan0
+ExecStartPre=/sbin/ip addr add ${AP_IP}/24 dev wlan0
+EOF
 
 # ── Enable/disable services based on ENABLED_PROTOCOLS ──────────────────────
 ENABLE_RTL433=false
 ENABLE_DUMP1090=false
 ENABLE_OP25=false
 ENABLE_LORAWAN=false
+ENABLE_POCSAG=false
+ENABLE_DUMP978=false
+ENABLE_DMR=false
+ENABLE_NXDN=false
+ENABLE_MESHTASTIC=false
 
 for proto in ${ENABLED_PROTOCOLS:-}; do
     case "$proto" in
-        tpms|pocsag) ENABLE_RTL433=true ;;
+        tpms|wmbus|zwave|sidewalk) ENABLE_RTL433=true ;;
+        pocsag)      ENABLE_POCSAG=true ;;
         adsb)        ENABLE_DUMP1090=true ;;
+        uat)         ENABLE_DUMP978=true ;;
         p25)         ENABLE_OP25=true ;;
+        dmr)         ENABLE_DMR=true ;;
+        nxdn)        ENABLE_NXDN=true ;;
         lorawan)     ENABLE_LORAWAN=true ;;
+        meshtastic)  ENABLE_MESHTASTIC=true ;;
         *)           echo "Warning: unknown protocol '${proto}'" >&2 ;;
     esac
 done
@@ -102,13 +119,41 @@ apply_service() {
     fi
 }
 
-apply_service sdr-pi-rtl433  "$ENABLE_RTL433"
-apply_service sdr-pi-dump1090 "$ENABLE_DUMP1090"
-apply_service sdr-pi-op25    "$ENABLE_OP25"
-apply_service sdr-pi-lorawan "$ENABLE_LORAWAN"
+apply_service sdr-pi-rtl433    "$ENABLE_RTL433"
+apply_service sdr-pi-dump1090  "$ENABLE_DUMP1090"
+apply_service sdr-pi-op25      "$ENABLE_OP25"
+apply_service sdr-pi-lorawan   "$ENABLE_LORAWAN"
+apply_service sdr-pi-pocsag    "$ENABLE_POCSAG"
+apply_service sdr-pi-dump978   "$ENABLE_DUMP978"
+apply_service sdr-pi-dmr       "$ENABLE_DMR"
+apply_service sdr-pi-nxdn      "$ENABLE_NXDN"
+apply_service sdr-pi-meshtastic "$ENABLE_MESHTASTIC"
 
 systemctl enable hostapd 2>/dev/null || true
 systemctl enable dnsmasq 2>/dev/null || true
 systemctl enable sdr-pi-performance 2>/dev/null || true
+
+# ── IP forwarding and NAT ────────────────────────────────────────────────────
+# Allow WiFi AP clients (wlan0) to reach the wired network (eth0) and vice
+# versa.  Also enables AP clients to reach the internet through eth0.
+echo ">>> Enabling IP forwarding and NAT (wlan0 <-> eth0)..."
+cat > /etc/sysctl.d/90-sdr-pi-forward.conf <<EOF
+net.ipv4.ip_forward=1
+EOF
+
+# NAT masquerade: AP clients appear as the Pi's eth0 IP to the outside.
+cat > /etc/NetworkManager/dispatcher.d/50-sdr-pi-nat <<'NATEOF'
+#!/bin/bash
+# Set up NAT when eth0 comes up so AP clients can reach the wired network.
+if [ "$1" = "eth0" ] && [ "$2" = "up" ]; then
+    iptables -t nat -C POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || \
+        iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+    iptables -C FORWARD -i wlan0 -o eth0 -j ACCEPT 2>/dev/null || \
+        iptables -A FORWARD -i wlan0 -o eth0 -j ACCEPT
+    iptables -C FORWARD -i eth0 -o wlan0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+        iptables -A FORWARD -i eth0 -o wlan0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+fi
+NATEOF
+chmod 755 /etc/NetworkManager/dispatcher.d/50-sdr-pi-nat
 
 echo ">>> Configuration applied. Reboot or restart services to take effect."

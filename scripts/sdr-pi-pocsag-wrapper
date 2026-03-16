@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Wrapper for POCSAG pager decoding via rtl_fm + multimon-ng.
+# Serves decoded text over TCP via ncat.
+# Clients connect via: nc <pi-ip> 4000
+set -euo pipefail
+
+source /etc/sdr-pi/sdr-pi.conf
+
+DEVICE_ARG=""
+if [[ -n "${POCSAG_DEVICE_SERIAL:-}" ]]; then
+    DEVICE_ARG="-d ${POCSAG_DEVICE_SERIAL}"
+fi
+
+GAIN_ARG=""
+if [[ "${POCSAG_GAIN:-auto}" != "auto" ]]; then
+    GAIN_ARG="-g ${POCSAG_GAIN}"
+fi
+
+PORT="${POCSAG_PORT:-4000}"
+FREQ="${POCSAG_FREQUENCY:-929.6125M}"
+
+# Pipeline: rtl_fm demodulates FM → multimon-ng decodes POCSAG → ncat serves TCP
+# Kill the whole pipeline when the service stops.
+exec rtl_fm \
+    -f "${FREQ}" \
+    -s 22050 \
+    ${DEVICE_ARG} \
+    ${GAIN_ARG} \
+    ${POCSAG_EXTRA_ARGS:-} \
+    2>/dev/null \
+    | multimon-ng -t raw -a POCSAG512 -a POCSAG1200 -a POCSAG2400 -f alpha - \
+    2>/dev/null \
+    | ncat -lk --send-only 0.0.0.0 "${PORT}"

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Wrapper for NXDN decoding via rtl_fm + dsd-fme.
+# Serves decoded output over TCP via ncat.
+# Clients connect via: nc <pi-ip> 4003
+set -euo pipefail
+
+source /etc/sdr-pi/sdr-pi.conf
+
+DEVICE_ARG=""
+if [[ -n "${NXDN_DEVICE_SERIAL:-}" ]]; then
+    DEVICE_ARG="-d ${NXDN_DEVICE_SERIAL}"
+fi
+
+GAIN_ARG=""
+if [[ "${NXDN_GAIN:-auto}" != "auto" ]]; then
+    GAIN_ARG="-g ${NXDN_GAIN}"
+fi
+
+PORT="${NXDN_PORT:-4003}"
+FREQ="${NXDN_FREQUENCY:-410M}"
+
+# Pipeline: rtl_fm demodulates → dsd-fme decodes NXDN → ncat serves TCP
+exec rtl_fm \
+    -f "${FREQ}" \
+    -s 48000 \
+    ${DEVICE_ARG} \
+    ${GAIN_ARG} \
+    ${NXDN_EXTRA_ARGS:-} \
+    2>/dev/null \
+    | dsd-fme -i - -o /dev/null -fi nxdn48 -N 2>/dev/null \
+    | ncat -lk --send-only 0.0.0.0 "${PORT}"

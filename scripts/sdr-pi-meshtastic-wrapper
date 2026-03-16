@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Wrapper for Meshtastic serial bridge.
+# Reads packets from a connected Meshtastic device and serves JSON over TCP.
+# Clients connect via: nc <pi-ip> 4004
+set -euo pipefail
+
+source /etc/sdr-pi/sdr-pi.conf
+
+PORT="${MESHTASTIC_PORT:-4004}"
+SERIAL="${MESHTASTIC_SERIAL_PORT:-/dev/ttyUSB0}"
+
+# Wait for the serial device to appear (USB devices may take a moment).
+for i in $(seq 1 30); do
+    [[ -e "$SERIAL" ]] && break
+    sleep 1
+done
+
+if [[ ! -e "$SERIAL" ]]; then
+    echo "Error: Meshtastic device not found at ${SERIAL}" >&2
+    exit 1
+fi
+
+# meshtastic --listen outputs JSON packets to stdout.
+exec /opt/meshtastic/bin/meshtastic \
+    --port "${SERIAL}" \
+    --listen \
+    ${MESHTASTIC_EXTRA_ARGS:-} \
+    2>/dev/null \
+    | ncat -lk --send-only 0.0.0.0 "${PORT}"

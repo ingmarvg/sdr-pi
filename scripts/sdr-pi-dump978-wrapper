@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Wrapper for dump978 (ADS-B UAT 978 MHz) that reads sdr-pi.conf.
+# Serves decoded frames over TCP via ncat.
+# Clients connect via: nc <pi-ip> 4001
+set -euo pipefail
+
+source /etc/sdr-pi/sdr-pi.conf
+
+DEVICE_ARG=""
+if [[ -n "${DUMP978_DEVICE_SERIAL:-}" ]]; then
+    DEVICE_ARG="--sdr-device-serial ${DUMP978_DEVICE_SERIAL}"
+fi
+
+GAIN_ARG=""
+case "${DUMP978_GAIN:-max}" in
+    max)  GAIN_ARG="--sdr-gain max" ;;
+    auto) GAIN_ARG="--sdr-gain auto" ;;
+    *)    GAIN_ARG="--sdr-gain ${DUMP978_GAIN}" ;;
+esac
+
+PORT="${DUMP978_PORT:-4001}"
+
+# dump978-fa has built-in JSON output; pipe through ncat for TCP serving.
+exec dump978-fa \
+    --sdr \
+    ${DEVICE_ARG} \
+    ${GAIN_ARG} \
+    --json \
+    ${DUMP978_EXTRA_ARGS:-} \
+    2>/dev/null \
+    | ncat -lk --send-only 0.0.0.0 "${PORT}"

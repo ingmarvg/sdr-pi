@@ -10,7 +10,19 @@ if [[ -f "$CONF" ]]; then
     echo ""
 fi
 
-SERVICES=(sdr-pi-rtl433 sdr-pi-dump1090 sdr-pi-op25 sdr-pi-lorawan hostapd dnsmasq)
+SERVICES=(
+    sdr-pi-rtl433
+    sdr-pi-dump1090
+    sdr-pi-op25
+    sdr-pi-lorawan
+    sdr-pi-pocsag
+    sdr-pi-dump978
+    sdr-pi-dmr
+    sdr-pi-nxdn
+    sdr-pi-meshtastic
+    hostapd
+    dnsmasq
+)
 
 printf "%-22s %-10s %-10s %s\n" "SERVICE" "ENABLED" "ACTIVE" "STATUS"
 printf "%-22s %-10s %-10s %s\n" "-------" "-------" "------" "------"
@@ -21,24 +33,14 @@ for svc in "${SERVICES[@]}"; do
 
     status=""
     if [[ "$active" == "active" ]]; then
-        # Show uptime
         status=$(systemctl show "$svc" --property=ActiveEnterTimestamp \
             --value 2>/dev/null || true)
     elif [[ "$active" == "failed" ]]; then
-        # Show last log line
         status=$(journalctl -u "$svc" -n1 --no-pager -o cat 2>/dev/null || true)
     fi
 
     printf "%-22s %-10s %-10s %s\n" "$svc" "$enabled" "$active" "$status"
 done
-
-echo ""
-echo "LoRaWAN concentrator:"
-if [[ -e /dev/spidev0.0 ]]; then
-    echo "  SPI device: /dev/spidev0.0 (present)"
-else
-    echo "  SPI device: not found (check dtoverlay in config.txt)"
-fi
 
 echo ""
 echo "RTL-SDR devices:"
@@ -47,3 +49,7 @@ if command -v rtl_test &>/dev/null; then
 else
     echo "  rtl_test not installed."
 fi
+
+echo ""
+echo "TCP ports:"
+ss -tlnp 2>/dev/null | grep -E ":(1234|4000|4001|4002|4003|4004|30003|23456|1680) " || echo "  No SDR ports listening."

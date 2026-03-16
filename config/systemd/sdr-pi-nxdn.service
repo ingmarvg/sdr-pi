@@ -1,0 +1,23 @@
+[Unit]
+Description=sdr-pi NXDN digital radio decoder
+After=network-online.target sdr-pi-performance.service
+Wants=network-online.target
+Requires=sdr-pi-performance.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/sdr-pi/sdr-pi.conf
+ExecStart=/usr/local/bin/sdr-pi-nxdn-wrapper
+Restart=on-failure
+RestartSec=5
+User=sdr
+Group=plugdev
+
+Nice=-10
+CPUAffinity=1-3
+LimitRTPRIO=50
+LimitMEMLOCK=infinity
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

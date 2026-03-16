@@ -173,7 +173,10 @@ APT_RETRY="-o Acquire::Retries=5"
 retry 3 "install core build deps" \
     $EATMYDATA apt-get install -y $APT_RETRY --no-install-recommends \
     git libusb-1.0-0-dev cmake build-essential pkg-config \
-    hostapd dnsmasq
+    hostapd dnsmasq ncat iptables \
+    multimon-ng \
+    libpulse-dev libsndfile1-dev libncurses-dev libcodec2-dev \
+    python3-venv
 
 # OP25 requires gnuradio (~200 MB of packages).  Install separately so
 # failure here doesn't block rtl_433, dump1090, or lorawan.
@@ -194,6 +197,32 @@ cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local -DDETACH_KERNEL_DRIVER=ON \
     -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS"
 make -j"$(nproc)" && make install && ldconfig
 cd /tmp && rm -rf rtl-sdr
+
+# ── Build libhackrf (HackRF One support for rtl_433 via SoapySDR) ─────
+cd /tmp
+git_clone_retry --branch v2024.02.1 --depth 1 https://github.com/greatscottgadgets/hackrf.git hackrf
+cd hackrf/host && mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS"
+make -j"$(nproc)" && make install && ldconfig
+cd /tmp && rm -rf hackrf
+
+# ── Build SoapySDR (vendor-neutral SDR abstraction layer) ─────────────
+cd /tmp
+git_clone_retry --branch soapy-sdr-0.8.1 --depth 1 https://github.com/pothosware/SoapySDR.git SoapySDR
+cd SoapySDR && mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS"
+make -j"$(nproc)" && make install && ldconfig
+cd /tmp && rm -rf SoapySDR
+
+# ── Build SoapyHackRF (SoapySDR plugin for HackRF) ───────────────────
+cd /tmp
+git_clone_retry --branch soapy-hackrf-0.3.4 --depth 1 https://github.com/pothosware/SoapyHackRF.git SoapyHackRF
+cd SoapyHackRF && mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
+make -j"$(nproc)" && make install && ldconfig
+cd /tmp && rm -rf SoapyHackRF
 
 cat > /etc/modprobe.d/blacklist-rtlsdr.conf <<'MOD'
 blacklist dvb_usb_rtl28xxu
@@ -267,18 +296,49 @@ build_lorawan() {
     && rm -f /usr/src/lora_json_bridge.c
 }
 
+build_dump978() {
+    cd /tmp \
+    && git_clone_retry --depth 1 https://github.com/flightaware/dump978.git dump978 \
+    && cd dump978 && mkdir build && cd build \
+    && cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS" \
+    && make -j"$(( $(nproc) / 4 + 1 ))" && make install \
+    && cd /tmp && rm -rf dump978
+}
+
+build_dsdfme() {
+    cd /tmp \
+    && git_clone_retry --depth 1 https://github.com/lwvmobile/dsd-fme.git dsd-fme \
+    && cd dsd-fme && mkdir build && cd build \
+    && cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_C_FLAGS="$SDR_PI_CFLAGS" -DCMAKE_CXX_FLAGS="$SDR_PI_CFLAGS" \
+    && make -j"$(( $(nproc) / 4 + 1 ))" && make install \
+    && cd /tmp && rm -rf dsd-fme
+}
+
+install_meshtastic() {
+    python3 -m venv /opt/meshtastic \
+    && /opt/meshtastic/bin/pip install --no-cache-dir meshtastic \
+    && ln -sf /opt/meshtastic/bin/meshtastic /usr/local/bin/meshtastic
+}
+
 # Export so subshells can use them.
 export SDR_PI_CFLAGS OP25_DEPS_OK
 export -f retry git_clone_retry
 export -f build_rtl433 build_dump1090 build_op25 build_lorawan
+export -f build_dump978 build_dsdfme install_meshtastic
 
-echo ">>> Building rtl_433, dump1090, OP25, and LoRaWAN in parallel..."
+echo ">>> Building SDR tools in parallel..."
 retry 2 "rtl_433 build" build_rtl433 &
 PID_RTL433=$!
 retry 2 "dump1090 build" build_dump1090 &
 PID_DUMP1090=$!
 retry 2 "lorawan build" build_lorawan &
 PID_LORAWAN=$!
+retry 2 "dump978 build" build_dump978 &
+PID_DUMP978=$!
+retry 2 "dsd-fme build" build_dsdfme &
+PID_DSDFME=$!
 
 # OP25 is optional — skip if gnuradio deps failed to install.
 PID_OP25=""
@@ -289,15 +349,20 @@ else
     echo ">>> Skipping OP25 build (dependencies unavailable)"
 fi
 
-# Wait for builds — core builds are required, OP25 is best-effort.
+# Wait for builds — core builds are required, others are best-effort.
 FAILED=0
-wait $PID_RTL433  || { echo "ERROR: rtl_433 build failed after retries" >&2; FAILED=1; }
+wait $PID_RTL433   || { echo "ERROR: rtl_433 build failed after retries" >&2; FAILED=1; }
 wait $PID_DUMP1090 || { echo "ERROR: dump1090 build failed after retries" >&2; FAILED=1; }
-wait $PID_LORAWAN || { echo "ERROR: lorawan build failed after retries" >&2; FAILED=1; }
+wait $PID_LORAWAN  || { echo "ERROR: lorawan build failed after retries" >&2; FAILED=1; }
+wait $PID_DUMP978  || { echo "WARNING: dump978 build failed — image will work without UAT support." >&2; }
+wait $PID_DSDFME   || { echo "WARNING: dsd-fme build failed — image will work without DMR/NXDN support." >&2; }
 
 if [ -n "$PID_OP25" ]; then
     wait $PID_OP25 || { echo "WARNING: OP25 build failed — image will work without P25 support." >&2; }
 fi
+
+# Meshtastic CLI — install after parallel builds (uses pip, quick).
+install_meshtastic || echo "WARNING: Meshtastic install failed — image will work without Meshtastic support." >&2
 
 if [ "$FAILED" -ne 0 ]; then
     exit 1
